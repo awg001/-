@@ -779,11 +779,11 @@
     var names = ["Микс (разная анимация, акценты — удар/глитч)"];
     for (var si = 1; si < STYLE_KEYS.length; si++) names.push(STYLES[STYLE_KEYS[si]].name);
     var rS = g3.add("group"); rS.add("statictext", undefined, "Появление");
-    var ddStyle = rS.add("dropdownlist", undefined, names); ddStyle.selection = Math.min(+pref("style", String(STYLE_KEYS.length - 1)), names.length - 1);
+    var ddStyle = rS.add("dropdownlist", undefined, names); ddStyle.selection = Math.min(+pref("style", String(STYLE_KEYS.indexOf("soft"))), names.length - 1); // default = storytelling preset
     var exNames = ["Микс (акценты — распад)"];
     for (si = 1; si < EXIT_KEYS.length; si++) exNames.push(EXITS[EXIT_KEYS[si]].name);
     var rE = g3.add("group"); rE.add("statictext", undefined, "Уход");
-    var ddExit = rE.add("dropdownlist", undefined, exNames); ddExit.selection = Math.min(+pref("exit", String(EXIT_KEYS.length - 1)), exNames.length - 1);
+    var ddExit = rE.add("dropdownlist", undefined, exNames); ddExit.selection = Math.min(+pref("exit", String(EXIT_KEYS.indexOf("soft"))), exNames.length - 1);
 
     var gm = g3.add("panel", undefined, "Что разрешено «Миксу»"); gm.alignChildren = ["left", "top"];
     var MIX_UI = [["pop", "Pop"], ["slide", "Выезд"], ["blur", "Размытие"], ["cut", "Рубленый"], ["rise", "Подъём"],
