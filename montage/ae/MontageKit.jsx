@@ -322,6 +322,33 @@
         return ws.slice(0, best).join(" ") + "\r" + ws.slice(best).join(" ");
     }
 
+    function bare(w) { return String(w).replace(/[.,!?…;:—«»"()\-]/g, ""); }
+
+    // Typography composition: which phrases get it and which word is the hero.
+    // mode: plain | all | mix (accent lines + every third line); hero = accent word, else the longest word of 4+ letters
+    function typoPlan(p, mode, i, hot) {
+        if (mode === "plain" || (mode === "mix" && !hot && i % 3 !== 1)) return null;
+        var big = -1, bl = 3, j;
+        for (j = 0; j < p.length; j++) if (p[j].accent) { big = j; break; }
+        if (big < 0) for (j = 0; j < p.length; j++) if (bare(p[j].w).length > bl) { bl = bare(p[j].w).length; big = j; }
+        return big < 0 ? null : { big: big };
+    }
+
+    // Hero word on its own line between the words before and after it; ranges = [start, end) of each word in the text
+    function typoLayout(ws, big) {
+        var lines = [ws.slice(0, big), [ws[big]], ws.slice(big + 1)], text = "", ranges = [], i, j;
+        for (i = 0; i < lines.length; i++) {
+            if (!lines[i].length) continue;
+            if (text) text += "\r";
+            for (j = 0; j < lines[i].length; j++) {
+                if (j) text += " ";
+                ranges.push([text.length, text.length + lines[i][j].length]);
+                text += lines[i][j];
+            }
+        }
+        return { text: text, ranges: ranges };
+    }
+
     function buildSubs(comp, ph, opt, offset) {
         var ctrl = getCtrl(comp, opt), styles = pickStyles(ph, opt.style, opt.en, opt.smart);
         var exits = pickExits(ph, styles, opt.exit, opt.en, opt.smart);
@@ -342,7 +369,10 @@
                 T.push(opt.display === "whole" ? j * 0.035 : st.per ? S[j] : j * st.stagger);
                 A.push(p[j].accent);
             }
-            var layer = comp.layers.addText(wrapLine(ws, opt.maxChars));
+            var hotI = phraseInfo(ph, i).hot, plan = typoPlan(p, opt.typo, i, hotI), lay = plan ? typoLayout(ws, plan.big) : null;
+            var ta = t0 + 0.15; // accent moment: the accent word, else just after the line appears
+            for (j = 0; j < p.length; j++) if (p[j].accent) { ta = offset + p[j].start; break; }
+            var layer = comp.layers.addText(lay ? lay.text : wrapLine(ws, opt.maxChars));
             layer.name = ws.join(" ").substring(0, 40); layer.comment = TAG;
             layer.startTime = 0; layer.inPoint = t0; layer.outPoint = Math.min(t1, comp.duration);
 
@@ -351,6 +381,15 @@
             td.font = opt.font; td.fontSize = opt.size; td.fillColor = [1, 1, 1];
             td.applyStroke = opt.stroke; td.strokeColor = [0, 0, 0]; td.strokeWidth = Math.round(opt.size * 0.09);
             td.strokeOverFill = false; td.justification = ParagraphJustification.CENTER_JUSTIFY;
+            if (lay) {
+                if (typeof td.characterRange === "function") { // per-word font and size: AE 2024+
+                    for (j = 0; j < ws.length; j++) {
+                        var cr = td.characterRange(lay.ranges[j][0], lay.ranges[j][1]);
+                        if (j === plan.big) { cr.font = opt.font2; cr.fontSize = Math.round(opt.size * opt.bigPct / 100); }
+                        else if (bare(ws[j]).length <= 3) cr.fontSize = Math.round(opt.size * opt.smallPct / 100);
+                    }
+                } else opt.note = "Разные шрифт и размер слов работают в AE 2024+; здесь только раскладка по строкам.";
+            }
             srcProp.setValue(td);
 
             var more = layer.property("ADBE Text Properties").property("ADBE Text More Options");
@@ -379,7 +418,7 @@
             layer.motionBlur = opt.mblur;
 
             // accent lines: on the accent word (or the line start for "!") the whole line kicks and shakes
-            if (opt.hotHit && phraseInfo(ph, i).hot) {
+            if (opt.hotHit && hotI) {
                 var th = t0;
                 for (j = 0; j < p.length; j++) if (p[j].accent) { th = offset + p[j].start; break; }
                 addPunch(comp, layer, { kind: "kick", t0: th, d: 0.22, s: 125, blur: opt.mblur });
@@ -392,6 +431,9 @@
             tr.property("ADBE Position").expression = "[thisComp.width/2,thisComp.height*" + opt.posY + "+" + C + '.effect("Y offset")(1)]';
             tr.property("ADBE Scale").expression = "var s=" + C + '.effect("Size %")(1);[s,s]';
             if (exits[i] === "fade") tr.property("ADBE Opacity").expression = "var f=3*thisComp.frameDuration;linear(time,outPoint-f,outPoint,100,0)";
+            function on(scope) { return scope === "all" || (scope === "hot" && hotI); }
+            if (on(opt.sweep)) addSweep(layer, ta, 0.6);
+            if (on(opt.glow)) addGlow(layer, opt.size);
             if (opt.shadow) {
                 var sh = layer.property("ADBE Effect Parade").addProperty("ADBE Drop Shadow");
                 sh.property("ADBE Drop Shadow-0004").setValue(Math.round(opt.size * 0.06));
@@ -482,6 +524,31 @@
         return pre;
     }
 
+    // ---------- light: glow and a light sweep across the layer ----------
+    function findEffect(re) {
+        for (var i = 0; i < app.effects.length; i++) if (re.test(app.effects[i].displayName)) return app.effects[i].matchName;
+        return null;
+    }
+
+    // Deep Glow if the plugin is installed (its own defaults), otherwise the built-in Glow tuned for text
+    function addGlow(layer, size) {
+        var fxs = layer.property("ADBE Effect Parade"), dg = findEffect(/^deep glow/i);
+        if (dg) return fxs.addProperty(dg);
+        var g = fxs.addProperty("ADBE Glo2"), set = [[2, 55], [3, Math.round(size * 0.35)], [4, 1.3]], i;
+        for (i = 0; i < set.length; i++) try { g.property(set[i][0]).setValue(set[i][1]); } catch (e) {}
+        return g;
+    }
+
+    // CC Light Sweep: the light band crosses the layer's visible box left to right in d seconds from t0
+    function addSweep(layer, t0, d) {
+        var fx = layer.property("ADBE Effect Parade").addProperty("CC Light Sweep");
+        fx.property(1).expression = "var r=sourceRectAtTime(time,false),p=Math.max(0,Math.min(1,(time-" + (Math.round(t0 * 1000) / 1000) + ")/" + d + "));\n" +
+            "var p2=1-Math.pow(1-p,2);[r.left-r.height+(r.width+2*r.height)*p2,r.top+r.height/2]";
+        try { fx.property(2).setValue(-25); } catch (e) {}
+        try { fx.property(5).setValue(90); } catch (e) {}
+        return fx;
+    }
+
     function shakeFrame(comp, o) {
         var L = comp.layers.addSolid([0, 0, 0], "SHAKE " + SHAKES[o.kind], comp.width, comp.height, comp.pixelAspect, comp.duration);
         L.adjustmentLayer = true; L.label = 11;
@@ -503,7 +570,7 @@
     var API = { trim: trim, parseJSONWords: parseJSONWords, parseSRT: parseSRT, groupPhrases: groupPhrases,
         phrasesToText: phrasesToText, textToPhrases: textToPhrases, pickStyles: pickStyles, revealExpr: revealExpr,
         highlightExpr: highlightExpr, accentExpr: accentExpr, wrapLine: wrapLine, STYLES: STYLES,
-        pickExits: pickExits, shakeExpr: shakeExpr, punchExpr: punchExpr, autoAccents: autoAccents, phraseInfo: phraseInfo, shatterMoveExpr: shatterMoveExpr, shatterFadeExpr: shatterFadeExpr, wordExitExpr: wordExitExpr, EXITS: EXITS };
+        pickExits: pickExits, shakeExpr: shakeExpr, punchExpr: punchExpr, typoPlan: typoPlan, typoLayout: typoLayout, autoAccents: autoAccents, phraseInfo: phraseInfo, shatterMoveExpr: shatterMoveExpr, shatterFadeExpr: shatterFadeExpr, wordExitExpr: wordExitExpr, EXITS: EXITS };
     if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
 
     // ---------- UI ----------
@@ -636,6 +703,23 @@
     var cMblur = g3.add("checkbox", undefined, "Motion blur (плавнее движение, рендер дольше)"); cMblur.value = pref("mblur", "1") === "1";
     var cHotHit = g3.add("checkbox", undefined, "Акцентные фразы: толчок + тряска на акцентном слове"); cHotHit.value = pref("hotHit", "1") === "1";
 
+    var g5 = tSub.add("panel", undefined, "4. Типографика и свет"); g5.alignChildren = ["left", "top"];
+    var TYPO = [["plain", "Одинаковая"], ["all", "Разная во всех фразах"], ["mix", "Микс: разная на акцентах и каждой 3-й фразе"]];
+    var tyNames = []; for (si = 0; si < TYPO.length; si++) tyNames.push(TYPO[si][1]);
+    var t1r = g5.add("group"); t1r.add("statictext", undefined, "Типографика");
+    var ddTypo = t1r.add("dropdownlist", undefined, tyNames); ddTypo.selection = Math.min(+pref("typo", "2"), 2);
+    var t2r = g5.add("group"); t2r.add("statictext", undefined, "Шрифт крупного слова");
+    var eFont2 = t2r.add("edittext", undefined, pref("font2", "PlayfairDisplay-Black")); eFont2.characters = 18;
+    var t3r = g5.add("group");
+    t3r.add("statictext", undefined, "Крупное, %"); var eBig = t3r.add("edittext", undefined, pref("bigPct", "160")); eBig.characters = 4;
+    t3r.add("statictext", undefined, "Мелкие слова, %"); var eSmall = t3r.add("edittext", undefined, pref("smallPct", "65")); eSmall.characters = 4;
+    var LIGHT = [["none", "нет"], ["hot", "на акцентных"], ["all", "на всех"]];
+    var lNames = []; for (si = 0; si < LIGHT.length; si++) lNames.push(LIGHT[si][1]);
+    var t4r = g5.add("group");
+    t4r.add("statictext", undefined, "Свечение"); var ddGlow = t4r.add("dropdownlist", undefined, lNames); ddGlow.selection = +pref("glow", "1");
+    t4r.add("statictext", undefined, "Блик"); var ddSweep = t4r.add("dropdownlist", undefined, lNames); ddSweep.selection = +pref("sweep", "1");
+    g5.add("statictext", undefined, "Крупное слово = акцент *…*, иначе самое длинное. Мелкие = слова до 3 букв.\nРазные шрифт и размер в одной фразе — AE 2024 и новее.", { multiline: true });
+
     var r4 = tSub.add("group"); r4.alignment = ["fill", "top"];
     var bBuild = r4.add("button", undefined, "Создать субтитры");
     var bRemove = r4.add("button", undefined, "Удалить субтитры");
@@ -706,6 +790,9 @@
     var cHShake = gh.add("checkbox", undefined, "+ резкая тряска в момент удара"); cHShake.value = pref("hShake", "1") === "1";
     var cHBlur = gh.add("checkbox", undefined, "Размытие в движении"); cHBlur.value = pref("hBlur", "1") === "1";
     var bHit = gh.add("button", undefined, "Применить к выделенным слоям");
+    var hl = gh.add("group");
+    var bGlow = hl.add("button", undefined, "Свечение");
+    var bSweep = hl.add("button", undefined, "Блик (Light Sweep) с текущего кадра");
     gh.add("statictext", undefined, "Можно выделить сразу все фразы субтитров и выбрать «с начала каждого слоя».\nСилу потом меняет эффект Hit scale на слое.", { multiline: true });
 
     bHit.onClick = function () {
@@ -729,6 +816,18 @@
         } catch (e) { alert("Ошибка: " + e + " (строка " + e.line + ")"); }
         app.endUndoGroup();
     };
+
+    function eachSelected(name, fn) {
+        var comp = activeComp(); if (!comp) return;
+        var sel = comp.selectedLayers, i;
+        if (!sel.length) { alert("Выделите слои."); return; }
+        app.beginUndoGroup("MontageKit: " + name);
+        try { for (i = 0; i < sel.length; i++) fn(comp, sel[i]); status.text = name + ": " + sel.length + " слой(ёв)."; }
+        catch (e) { alert("Ошибка: " + e + " (строка " + e.line + ")"); }
+        app.endUndoGroup();
+    }
+    bGlow.onClick = function () { eachSelected("свечение", function (c, L) { addGlow(L, +eSize.text || 90); }); };
+    bSweep.onClick = function () { eachSelected("блик", function (c, L) { addSweep(L, c.time, 0.6 * Math.max(0.2, +eHDur.text || 1)); }); };
 
     var status = win.add("statictext", undefined, "Выберите слой с голосом и нажмите «Распознать», или импортируйте SRT.", { truncate: "end" });
 
@@ -781,6 +880,8 @@
         var opt = {
             en: (function () { var a = checkedKeys(cbIn, MIX_UI), b = checkedKeys(cbOut, EXIT_UI), k; for (k in b) a[k] = b[k]; return a; })(),
             smart: cSmart.value, display: DISPLAY[ddDisplay.selection.index][0], hotHit: cHotHit.value,
+            typo: TYPO[ddTypo.selection.index][0], font2: eFont2.text, bigPct: +eBig.text || 160, smallPct: +eSmall.text || 65,
+            glow: LIGHT[ddGlow.selection.index][0], sweep: LIGHT[ddSweep.selection.index][0],
             style: STYLE_KEYS[ddStyle.selection.index], exit: EXIT_KEYS[ddExit.selection.index], mblur: cMblur.value, font: eFont.text, size: +eSize.text || 90,
             posY: (+ePos.text || 72) / 100, maxChars: +eChars.text || 18, hold: 0.4,
             hl: hex(eHl.text.replace("#", "")), accent: hex(eAcc.text.replace("#", "")),
@@ -788,7 +889,8 @@
         };
         var keep = { maxWords: eWords.text, maxChars: eChars.text, style: ddStyle.selection.index, exit: ddExit.selection.index,
             mblur: cMblur.value ? 1 : 0, enIn: checkedKeys(cbIn, MIX_UI).list, enOut: checkedKeys(cbOut, EXIT_UI).list,
-            smart: cSmart.value ? 1 : 0, display: ddDisplay.selection.index, hotHit: cHotHit.value ? 1 : 0, voice: cVoice.value ? 1 : 0, thr: eThr.text, font: eFont.text, size: eSize.text,
+            smart: cSmart.value ? 1 : 0, display: ddDisplay.selection.index, hotHit: cHotHit.value ? 1 : 0, typo: ddTypo.selection.index, font2: eFont2.text,
+            bigPct: eBig.text, smallPct: eSmall.text, glow: ddGlow.selection.index, sweep: ddSweep.selection.index, voice: cVoice.value ? 1 : 0, thr: eThr.text, font: eFont.text, size: eSize.text,
             posY: ePos.text, hl: eHl.text, acc: eAcc.text, kara: cKara.value ? 1 : 0, upper: cUpper.value ? 1 : 0,
             stroke: cStroke.value ? 1 : 0, shadow: cShadow.value ? 1 : 0 };
         for (var k in keep) setPref(k, keep[k]);
@@ -796,7 +898,7 @@
         try {
             removeSubs(comp);
             var n = buildSubs(comp, textToPhrases(editor.text, words), opt, offset);
-            status.text = "Готово: " + n + " фраз. Общий вид — эффекты слоя " + CTRL + ".";
+            status.text = opt.note || ("Готово: " + n + " фраз. Общий вид — эффекты слоя " + CTRL + ".");
         } catch (e) { alert("Ошибка: " + e + " (строка " + e.line + ")"); }
         app.endUndoGroup();
     };
