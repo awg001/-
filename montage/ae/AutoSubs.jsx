@@ -24,7 +24,7 @@
         for (i = 0; i < arr.length; i++) {
             w = arr[i];
             var txt = trim(w.w !== undefined ? w.w : (w.word !== undefined ? w.word : w.text));
-            if (txt) out.push({ w: txt, start: +w.start, end: +w.end });
+            if (txt) out.push({ w: txt, start: +w.start, end: +w.end, db: w.db });
         }
         return out;
     }
@@ -75,6 +75,21 @@
         return ph;
     }
 
+    // Voice accents: in each phrase the loudest word (vs the speaker's median, from transcribe.py) if it stands out by thr dB
+    function autoAccents(ph, thr) {
+        var i, j, best, p;
+        for (i = 0; i < ph.length; i++) {
+            p = ph[i]; best = -1;
+            for (j = 0; j < p.length; j++) {
+                p[j].accent = false;
+                var bare = p[j].w.replace(/[.,!?…;:—«»"()\-]/g, "");
+                if (p[j].db !== undefined && bare.length >= 3 && p[j].db >= thr && (best < 0 || p[j].db > p[best].db)) best = j;
+            }
+            if (best >= 0) p[best].accent = true;
+        }
+        return ph;
+    }
+
     function fmtTime(t) {
         var m = Math.floor(t / 60), s = t - m * 60;
         return (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s.toFixed(1);
@@ -84,7 +99,7 @@
         var lines = [], i, j, ws;
         for (i = 0; i < ph.length; i++) {
             ws = [];
-            for (j = 0; j < ph[i].length; j++) ws.push(ph[i][j].w);
+            for (j = 0; j < ph[i].length; j++) ws.push(ph[i][j].accent ? "*" + ph[i][j].w + "*" : ph[i][j].w);
             lines.push(fmtTime(ph[i][0].start) + " | " + ws.join(" "));
         }
         return lines.join("\n");
@@ -145,30 +160,70 @@
     var EXIT_KEYS = ["mix", "fade", "shatter", "up", "blurout", "flick"];
     var EXIT_MIX = ["up", "blurout", "flick", "fade"];
 
-    // Mix: rotate through calm styles without repeats; lines with an accent word or "!" get the punch
-    function pickStyles(ph, mode) {
-        var res = [], last = "", i, j, seed = 7, nhot = 0;
+    function pool(list, en) {
+        var r = [], i;
+        for (i = 0; i < list.length; i++) if (en[list[i]]) r.push(list[i]);
+        return r;
+    }
+
+    // deterministic pick that never repeats the previous one
+    function nextFrom(list, last, rng) {
+        if (!list.length) return null;
+        if (list.length === 1) return list[0];
+        var s;
+        do { rng.seed = (rng.seed * 1103515245 + 12345) % 2147483648; s = list[rng.seed % list.length]; } while (s === last);
+        return s;
+    }
+
+    function phraseInfo(ph, i) {
+        var p = ph[i], lw = p[p.length - 1].w, hot = /!$/.test(lw), dur = 0, j;
+        for (j = 0; j < p.length; j++) { if (p[j].accent) hot = true; dur += p[j].end - p[j].start; }
+        return {
+            hot: hot, question: /\?$/.test(lw), end: /[.!?…]$/.test(lw), fast: dur / p.length < 0.22,
+            gapBefore: i ? p[0].start - ph[i - 1][ph[i - 1].length - 1].end : 99,
+            gapAfter: i + 1 < ph.length ? ph[i + 1][0].start - p[p.length - 1].end : 99
+        };
+    }
+
+    // Mix uses only the ticked styles. Accent / "!" lines take the strong ones (punch, glitch).
+    // Smart mode reads the speech: a line after a long pause opens calmly and big, a question flickers,
+    // fast speech gets snappy cuts; everything else rotates without repeats.
+    function pickStyles(ph, mode, en, smart) {
+        var res = [], last = "", rng = { seed: 7 }, i;
+        if (mode !== "mix") { for (i = 0; i < ph.length; i++) res.push(mode); return res; }
+        var calm = pool(MIX, en), hot = pool(HOT, en);
+        if (!calm.length) calm = hot.length ? hot : ["pop"];
+        if (!hot.length) hot = calm;
+        function prefer(list) { return nextFrom(pool(list, en), last, rng); }
         for (i = 0; i < ph.length; i++) {
-            if (mode !== "mix") { res.push(mode); continue; }
-            var hot = /!$/.test(ph[i][ph[i].length - 1].w);
-            for (j = 0; j < ph[i].length; j++) if (ph[i][j].accent) hot = true;
-            var s;
-            if (hot) s = HOT[nhot++ % HOT.length];
-            else {
-                do { seed = (seed * 1103515245 + 12345) % 2147483648; s = MIX[seed % MIX.length]; } while (s === last);
+            var inf = phraseInfo(ph, i), c = null;
+            if (inf.hot) c = nextFrom(hot, last, rng);
+            else if (smart) {
+                if (inf.question) c = prefer(["flick", "blur"]);
+                else if (inf.gapBefore >= 0.8) c = prefer(["rise", "slide", "blur"]);
+                else if (inf.fast) c = prefer(["cut", "pop"]);
             }
-            res.push(s); last = s;
+            if (!c) c = nextFrom(calm, last, rng);
+            res.push(c); last = c;
         }
         return res;
     }
 
-    // Mix exits: accent lines break apart into letters, the rest rotate without repeats
-    function pickExits(styles, mode) {
-        var res = [], last = "", seed = 11, i, e;
-        for (i = 0; i < styles.length; i++) {
-            if (mode !== "mix") { res.push(mode); continue; }
-            if (styles[i] === "punch" || styles[i] === "glitch") e = "shatter";
-            else do { seed = (seed * 1103515245 + 12345) % 2147483648; e = EXIT_MIX[seed % EXIT_MIX.length]; } while (e === last);
+    // Exits: strong lines break apart. Smart mode keeps mid-sentence lines on a quick fade (speech flows on)
+    // and gives a visible exit only where a sentence ends on a pause.
+    function pickExits(ph, styles, mode, en, smart) {
+        var res = [], last = "", rng = { seed: 11 }, i;
+        if (mode !== "mix") { for (i = 0; i < ph.length; i++) res.push(mode); return res; }
+        var rest = pool(EXIT_MIX, en), strong = pool(["up", "blurout", "flick"], en);
+        if (!rest.length) rest = en.shatter ? ["shatter"] : ["fade"];
+        for (i = 0; i < ph.length; i++) {
+            var inf = phraseInfo(ph, i), e = null;
+            if ((inf.hot || styles[i] === "punch" || styles[i] === "glitch") && en.shatter) e = "shatter";
+            else if (smart) {
+                if (!(inf.end && inf.gapAfter >= 0.5)) e = en.fade ? "fade" : null;
+                else e = nextFrom(strong, last, rng);
+            }
+            if (!e) e = nextFrom(rest, last, rng);
             res.push(e); last = e;
         }
         return res;
@@ -268,7 +323,8 @@
     }
 
     function buildSubs(comp, ph, opt, offset) {
-        var ctrl = getCtrl(comp, opt), styles = pickStyles(ph, opt.style), exits = pickExits(styles, opt.exit);
+        var ctrl = getCtrl(comp, opt), styles = pickStyles(ph, opt.style, opt.en, opt.smart);
+        var exits = pickExits(ph, styles, opt.exit, opt.en, opt.smart);
         var C = 'thisComp.layer("' + CTRL + '")';
         if (opt.mblur) comp.motionBlur = true;
         var made = 0, i, j;
@@ -344,7 +400,7 @@
     var API = { trim: trim, parseJSONWords: parseJSONWords, parseSRT: parseSRT, groupPhrases: groupPhrases,
         phrasesToText: phrasesToText, textToPhrases: textToPhrases, pickStyles: pickStyles, revealExpr: revealExpr,
         highlightExpr: highlightExpr, accentExpr: accentExpr, wrapLine: wrapLine, STYLES: STYLES,
-        pickExits: pickExits, shatterMoveExpr: shatterMoveExpr, shatterFadeExpr: shatterFadeExpr, wordExitExpr: wordExitExpr, EXITS: EXITS };
+        pickExits: pickExits, autoAccents: autoAccents, phraseInfo: phraseInfo, shatterMoveExpr: shatterMoveExpr, shatterFadeExpr: shatterFadeExpr, wordExitExpr: wordExitExpr, EXITS: EXITS };
     if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
 
     // ---------- UI ----------
@@ -416,6 +472,37 @@
     for (si = 1; si < EXIT_KEYS.length; si++) exNames.push(EXITS[EXIT_KEYS[si]].name);
     var rE = g3.add("group"); rE.add("statictext", undefined, "Уход");
     var ddExit = rE.add("dropdownlist", undefined, exNames); ddExit.selection = Math.min(+pref("exit", "0"), exNames.length - 1);
+
+    var gm = g3.add("panel", undefined, "Что разрешено «Миксу»"); gm.alignChildren = ["left", "top"];
+    var MIX_UI = [["pop", "Pop"], ["slide", "Выезд"], ["blur", "Размытие"], ["cut", "Рубленый"], ["rise", "Подъём"],
+        ["flick", "Мерцание"], ["punch", "Удар"], ["glitch", "Глитч"]];
+    var EXIT_UI = [["fade", "Затухание"], ["shatter", "Распад"], ["up", "Вылет"], ["blurout", "Размытие"], ["flick", "Мерцание"]];
+    var onIn = "," + pref("enIn", "pop,slide,blur,cut,rise,flick,punch,glitch") + ",";
+    var onOut = "," + pref("enOut", "fade,shatter,up,blurout,flick") + ",";
+    var cbIn = [], cbOut = [], row, ci;
+    gm.add("statictext", undefined, "Появление:");
+    for (ci = 0; ci < MIX_UI.length; ci++) {
+        if (ci % 4 === 0) row = gm.add("group");
+        cbIn.push(row.add("checkbox", undefined, MIX_UI[ci][1])); cbIn[ci].value = onIn.indexOf("," + MIX_UI[ci][0] + ",") >= 0;
+    }
+    gm.add("statictext", undefined, "Уход:");
+    row = gm.add("group");
+    for (ci = 0; ci < EXIT_UI.length; ci++) {
+        cbOut.push(row.add("checkbox", undefined, EXIT_UI[ci][1])); cbOut[ci].value = onOut.indexOf("," + EXIT_UI[ci][0] + ",") >= 0;
+    }
+    var cSmart = gm.add("checkbox", undefined, "Умный подбор: паузы, вопросы, темп речи, конец предложения");
+    cSmart.value = pref("smart", "1") === "1";
+    var rv = gm.add("group");
+    var cVoice = rv.add("checkbox", undefined, "Акценты по голосу: громче на"); cVoice.value = pref("voice", "1") === "1";
+    var eThr = rv.add("edittext", undefined, pref("thr", "5")); eThr.characters = 3;
+    rv.add("statictext", undefined, "дБ");
+
+    function checkedKeys(cbs, ui) {
+        var en = {}, list = [], i;
+        for (i = 0; i < cbs.length; i++) if (cbs[i].value) { en[ui[i][0]] = true; list.push(ui[i][0]); }
+        en.list = list.join(",");
+        return en;
+    }
     var r3 = g3.add("group");
     r3.add("statictext", undefined, "Шрифт (PostScript)");
     var eFont = r3.add("edittext", undefined, pref("font", "Montserrat-ExtraBold")); eFont.characters = 18;
@@ -443,7 +530,9 @@
 
     function regroup() {
         if (!words.length) return;
-        editor.text = phrasesToText(groupPhrases(words, Math.max(1, +eWords.text || 3), Math.max(4, +eChars.text || 18), 0.4));
+        var ph = groupPhrases(words, Math.max(1, +eWords.text || 3), Math.max(4, +eChars.text || 18), 0.4);
+        if (cVoice.value) autoAccents(ph, +eThr.text || 5);
+        editor.text = phrasesToText(ph);
         status.text = words.length + " слов. Проверьте текст и нажмите «Создать субтитры».";
     }
 
@@ -476,18 +565,22 @@
     };
 
     bRegroup.onClick = regroup;
+    cVoice.onClick = regroup;
 
     bBuild.onClick = function () {
         var comp = activeComp(); if (!comp) return;
         if (!words.length || !trim(editor.text)) { alert("Сначала распознайте речь или импортируйте субтитры."); return; }
         var opt = {
+            en: (function () { var a = checkedKeys(cbIn, MIX_UI), b = checkedKeys(cbOut, EXIT_UI), k; for (k in b) a[k] = b[k]; return a; })(),
+            smart: cSmart.value,
             style: STYLE_KEYS[ddStyle.selection.index], exit: EXIT_KEYS[ddExit.selection.index], mblur: cMblur.value, font: eFont.text, size: +eSize.text || 90,
             posY: (+ePos.text || 72) / 100, maxChars: +eChars.text || 18, hold: 0.4,
             hl: hex(eHl.text.replace("#", "")), accent: hex(eAcc.text.replace("#", "")),
             karaoke: cKara.value, upper: cUpper.value, stroke: cStroke.value, shadow: cShadow.value
         };
         var keep = { maxWords: eWords.text, maxChars: eChars.text, style: ddStyle.selection.index, exit: ddExit.selection.index,
-            mblur: cMblur.value ? 1 : 0, font: eFont.text, size: eSize.text,
+            mblur: cMblur.value ? 1 : 0, enIn: checkedKeys(cbIn, MIX_UI).list, enOut: checkedKeys(cbOut, EXIT_UI).list,
+            smart: cSmart.value ? 1 : 0, voice: cVoice.value ? 1 : 0, thr: eThr.text, font: eFont.text, size: eSize.text,
             posY: ePos.text, hl: eHl.text, acc: eAcc.text, kara: cKara.value ? 1 : 0, upper: cUpper.value ? 1 : 0,
             stroke: cStroke.value ? 1 : 0, shadow: cShadow.value ? 1 : 0 };
         for (var k in keep) setPref(k, keep[k]);
