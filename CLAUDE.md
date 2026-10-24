@@ -42,11 +42,24 @@
 - Стикеры не ставить на лицо.
 - PIL не читает woff2 и кириллица у fontsource в отдельном сабсете — склеивать latin+cyrillic (`tools/fonts.py`).
 
+## Озвучка
+- ElevenLabs (claude.ai-коннектор): `creative_list_voices` (languages=['ru']) → `creative_generate_speech` с `estimate_only`
+  → показать цену и получить «да» → генерация → `creative_get_flow_run_status` → скачать `content_url`
+  (storage.googleapis.com открыт). Голос по умолчанию для сторителлинга: «Ivan — Multilingual Storyteller» `1kb4Md8n0kMNktygYhDF`, eleven_v4.
+- Часто 429 (rate limit): повтор через минуту безопасен, если генерация не стартовала (в ответе нет session_id).
+- Тайминг слов: `python3 montage/tools/align.py vo.mp3 script.txt words.json` (в script.txt числа как `1901|тысяча_девятьсот_первом`).
+- Микс: голос сверху, фон с дакингом (`projects/zelimkhan/sfx.py`), при сборке `-af loudnorm=I=-14:TP=-1.5:LRA=11`.
+
 ## Ограничения среды
-- Сеть: работают GitHub (raw + releases), PyPI, npm. Не работают Unsplash/Pexels/Wikimedia/HF/Google Fonts,
+- Изменение сетевых настроек окружения в уже запущенном контейнере не подхватилось (наблюдение) — проверять в новой сессии.
+- Сеть: работают GitHub (raw + releases), PyPI, npm, storage.googleapis.com. Не работают Unsplash/Pexels/Wikimedia/HF/Google Fonts,
   домены выдачи Canva/Runway. Unsplash MCP требует подтверждения почты у пользователя.
 - Голова/лицо не оживляются кодом — нужен видеофутаж пользователя или image-to-video (Runway/Luma, платно).
 - After Effects нет; на выходе MP4.
 
 ## Проекты
+- `montage/lib/storykit.py` — общие хелперы стиля (камера, слои, плашки, стикеры, слова, zoom blur, грейд). Новые проекты импортируют его.
 - `montage/projects/mona_lisa/` — тест 9 с: кража «Моны Лизы» в стиле референса `wolf_storytelling.md`.
+- `montage/projects/zelimkhan/` — 49.5 с, абрек Зелимхан, озвучка ElevenLabs + субтитры. Визуал процедурный
+  (горы, решётка, дело, рельсы, розыск, карта Natural Earth) — архивы фото были закрыты сетью; при открытой сети
+  заменить сцены на реальные фото (портрет Зелимхана ~1910, старый Грозный, горы, паровоз).
