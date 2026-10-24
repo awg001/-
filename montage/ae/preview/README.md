@@ -1,0 +1,23 @@
+# Виртуальный After Effects — предпросмотр Caption AE
+
+Проверка плагина без After Effects:
+1. `mock_ae.js` — заглушка DOM AE (композиция, слои, свойства, эффекты, ключи, `sourceRectAtTime`).
+2. `render.js` запускает **настоящие** функции `CaptionAE.jsx` (`buildSubs`, `shakeFrame`, …) так же, как панель,
+   затем кадр за кадром выполняет выражения, которые плагин записал в слои (появление, караоке, акценты, уход,
+   удар, тряска, блик), и рисует текст через `@napi-rs/canvas`.
+
+Приближения: нет motion blur, свой шум для `wiggle`, Glow / Light Sweep / Drop Shadow нарисованы вручную.
+
+```bash
+bash montage/setup.sh                       # шрифты в work/fonts
+npm i --prefix /tmp/vae @napi-rs/canvas@0.1.65
+export NODE_PATH=/tmp/vae/node_modules
+node montage/ae/preview/render.js out 0 648  # кадры + layers.txt (что создал плагин) + panel_text.txt
+ffmpeg -framerate 30 -i out/%04d.png -i montage/projects/zelimkhan/zelimkhan.mp4 -map 0:v -map 1:a -t 21.6 \
+  -c:v libx264 -crf 18 -pix_fmt yuv420p -c:a aac preview.mp4
+```
+Сцена (функция `scene()`): 21,6 с голоса из ролика про Зелимхана; 0–15 с — фразы по мере речи, «Микс», умный подбор,
+типографика «Микс», свечение и блик на акцентах; 15–21 с — по одному слову; нарастающая тряска кадра 17,4–19 с.
+
+Что нашёл первый прогон (исправлено в плагине): крупное слово не влезало в кадр; одинокое «—» уходило на свою строку;
+в режиме «по одному слову» типографика срабатывала без акцента; караоке-увеличение 108% съедало пробел между словами.

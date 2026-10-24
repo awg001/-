@@ -330,6 +330,7 @@
     // mode: plain | all | mix (accent lines + every third line); hero = accent word, else the longest word of 4+ letters
     function typoPlan(p, mode, i, hot) {
         if (mode === "plain" || (mode === "mix" && !hot && i % 3 !== 1)) return null;
+        if (p.length === 1 && !hot) return null; // one word on screen: only an accent earns the big type
         var big = -1, bl = 3, j;
         for (j = 0; j < p.length; j++) if (p[j].accent) { big = j; break; }
         if (big < 0) for (j = 0; j < p.length; j++) if (bare(p[j].w).length > bl) { bl = bare(p[j].w).length; big = j; }
@@ -338,7 +339,9 @@
 
     // Hero word on its own line between the words before and after it; ranges = [start, end) of each word in the text
     function typoLayout(ws, big) {
-        var lines = [ws.slice(0, big), [ws[big]], ws.slice(big + 1)], text = "", ranges = [], i, j;
+        var after = big + 1;
+        while (after < ws.length && bare(ws[after]) === "") after++; // a lone "—" or "!" stays on the hero's line
+        var lines = [ws.slice(0, big), ws.slice(big, after), ws.slice(after)], text = "", ranges = [], i, j;
         for (i = 0; i < lines.length; i++) {
             if (!lines[i].length) continue;
             if (text) text += "\r";
@@ -393,14 +396,19 @@
                 } else opt.note = "Разные шрифт и размер слов работают в AE 2024+; здесь только раскладка по строкам.";
             }
             srcProp.setValue(td);
+            // fit: measured before any animator exists, so allow for the karaoke (104%) and accent (112%) growth added later;
+            // wider than 90% of the frame -> the layer's own scale shrinks it
+            var grow = 1.04, rc = layer.sourceRectAtTime(t0, false);
+            for (j = 0; j < p.length; j++) if (p[j].accent) grow = 1.04 * 1.12;
+            var fit = rc.width * grow > comp.width * 0.9 ? comp.width * 0.9 / (rc.width * grow) * 100 : 100;
 
             var more = layer.property("ADBE Text Properties").property("ADBE Text More Options");
             more.property("ADBE Text Anchor Point Option").setValue(2); // scale each word around its own center
             more.property("ADBE Text Anchor Point Align").setValue([0, -35]);
 
             addAnimator(layer, "Base color", { "ADBE Text Fill Color": C + '.effect("Text")(1)' }, null);
-            addAnimator(layer, "Accent", { "ADBE Text Fill Color": C + '.effect("Accent")(1)', "ADBE Text Scale 3D": [118, 118, 100] }, accentExpr(A));
-            addAnimator(layer, "Highlight", { "ADBE Text Fill Color": C + '.effect("Highlight")(1)', "ADBE Text Scale 3D": [108, 108, 100] }, highlightExpr(S));
+            addAnimator(layer, "Accent", { "ADBE Text Fill Color": C + '.effect("Accent")(1)', "ADBE Text Scale 3D": [112, 112, 100] }, accentExpr(A));
+            addAnimator(layer, "Highlight", { "ADBE Text Fill Color": C + '.effect("Highlight")(1)', "ADBE Text Scale 3D": [104, 104, 100] }, highlightExpr(S));
             var rv = {};
             if (st.scale !== 100) rv["ADBE Text Scale 3D"] = [st.scale, st.scale, 100];
             if (st.pos[0] || st.pos[1]) rv["ADBE Text Position 3D"] = [st.pos[0], st.pos[1], 0];
@@ -432,6 +440,7 @@
             tr.property("ADBE Anchor Point").expression = "var r=sourceRectAtTime(Math.max(inPoint,outPoint-" + D + "-thisComp.frameDuration),false);[r.left+r.width/2,r.top+r.height/2]";
             tr.property("ADBE Position").setValue([comp.width / 2, comp.height * opt.posY]);
             tr.property("ADBE Position").expression = "value+[0," + C + '.effect("Y offset")(1)]';
+            tr.property("ADBE Scale").setValue([fit, fit]);
             tr.property("ADBE Scale").expression = "var s=" + C + '.effect("Size %")(1)/100;[value[0]*s,value[1]*s]';
             if (exits[i] === "fade") tr.property("ADBE Opacity").expression = "var f=3*thisComp.frameDuration;value*linear(time,outPoint-f,outPoint,1,0)";
             function on(scope) { return scope === "all" || (scope === "hot" && hotI); }
@@ -573,7 +582,8 @@
     var API = { trim: trim, parseJSONWords: parseJSONWords, parseSRT: parseSRT, groupPhrases: groupPhrases,
         phrasesToText: phrasesToText, textToPhrases: textToPhrases, pickStyles: pickStyles, revealExpr: revealExpr,
         highlightExpr: highlightExpr, accentExpr: accentExpr, wrapLine: wrapLine, STYLES: STYLES,
-        pickExits: pickExits, shakeExpr: shakeExpr, punchExpr: punchExpr, typoPlan: typoPlan, typoLayout: typoLayout, autoAccents: autoAccents, phraseInfo: phraseInfo, shatterMoveExpr: shatterMoveExpr, shatterFadeExpr: shatterFadeExpr, wordExitExpr: wordExitExpr, EXITS: EXITS };
+        pickExits: pickExits, shakeExpr: shakeExpr, punchExpr: punchExpr, typoPlan: typoPlan, typoLayout: typoLayout,
+        buildSubs: buildSubs, shakeFrame: shakeFrame, addShake: addShake, addPunch: addPunch, addGlow: addGlow, addSweep: addSweep, autoAccents: autoAccents, phraseInfo: phraseInfo, shatterMoveExpr: shatterMoveExpr, shatterFadeExpr: shatterFadeExpr, wordExitExpr: wordExitExpr, EXITS: EXITS };
     if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
 
     // ---------- UI ----------
