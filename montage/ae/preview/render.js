@@ -21,7 +21,23 @@ const W = 1080, H = 1920, FPS = 30;
 
 // ---------- scenes: what the panel would do ----------
 // SCENE=story (default): the "Сторителлинг — сдержанно" preset over the whole clip; SCENE=mix: everything switched on
-function scene() { return (process.env.SCENE || "story") === "mix" ? sceneMix() : sceneStory(); }
+function scene() { const k = process.env.SCENE || "story"; return k === "mix" ? sceneMix() : k === "jatho" ? sceneJatho() : sceneStory(); }
+
+// "Jatho — эксперт" preset: two-tone hook title, phrase pops in white caps, accent words red, punch-in on accents
+function sceneJatho() {
+    const words = CK.parseJSONWords(fs.readFileSync(path.join(ROOT, "montage/projects/zelimkhan/words.json"), "utf8")).filter(w => w.start < 15.3);
+    const comp = new CompItem(W, H, 15.6, FPS);
+    const foot = comp.layers.addSolid([0, 0, 0], "BG", W, H); foot.footage = true; // the talking-head clip
+    const opt = { en: {}, smart: true, style: "jpop", exit: "fade", mblur: true, font: "Montserrat-ExtraBold", size: 92, posY: 0.75, accentScale: 100,
+        maxChars: 18, hold: 0.4, hl: [0.97, 0.84, 0.25], accent: [0.9, 0.1, 0.15], karaoke: false, upper: true, stroke: true, shadow: true,
+        hotHit: false, typo: "plain", font2: "PlayfairDisplay-Black", bigPct: 160, smallPct: 100, glow: "none", sweep: "none",
+        heroUpper: true, heroFly: false, display: "whole", zoomLayer: foot, zoomAmt: 12, zoomDur: 0 };
+    const txt = markAccents(CK.phrasesToText(CK.groupPhrases(words, 3, 18, 0.4)), ["одним", "Зелимхан", "тюрьму", "несправедливым."]);
+    CK.buildSubs(comp, CK.textToPhrases(txt, words), opt, 0);
+    comp.time = 0;
+    CK.addHookTitle(comp, { l1: "Его искала", l2: "вся империя", color: [0.898, 0.098, 0.149], t0: 0.1, dur: 2.6, y: 0.40, font: "Montserrat-ExtraBold", glow: true });
+    return { comp, phA: txt, phB: "" };
+}
 
 const markAccents = (txt, list) => list.reduce((t, w) => t.replace(new RegExp("(\\| |\\s)" + w.replace(".", "\\.") + "(?=\\s|$)"), "$1*" + w + "*"), txt);
 
@@ -167,7 +183,8 @@ function drawText(ctx, layer, t) {
     const anims = layer.property("ADBE Text Properties").property("ADBE Text Animators").children;
     const nW = L.words.length, nC = L.chars.length;
     // animator amounts per character
-    const st = L.chars.map(() => ({ sx: 1, sy: 1, px: 0, py: 0, rot: 0, op: 1, blur: 0, col: [1, 1, 1] }));
+    const fill = (L.td.fillColor || [1, 1, 1]).slice(0, 3); // the text's own colour, before any animator
+    const st = L.chars.map(() => ({ sx: 1, sy: 1, px: 0, py: 0, rot: 0, op: 1, blur: 0, col: fill.slice() }));
     for (const an of anims) {
         const sel = an.property("ADBE Text Selectors").children[0];
         let amt = () => [1, 1, 1];
@@ -267,6 +284,26 @@ function applyAdjust(ctx, layer, t, frame) {
     ctx.drawImage(tmp, 0, 0, W, H, -W * 0.1, -H * 0.1, W * 1.2, H * 1.2); ctx.drawImage(tmp, 0, 0, W, H, 0, 0, W, H); ctx.restore();
 }
 
+// ---------- footage stand-in: a still, cover-fit, darkened; Transform effects on its layer apply (punch zoom) ----------
+let FOOT = null;
+async function loadFootage() {
+    const img = await loadImage(path.join(ROOT, "work/assets/s9.jpg")), c = createCanvas(W, H), x = c.getContext("2d");
+    const k = Math.max(W / img.width, H / img.height);
+    x.drawImage(img, (W - img.width * k) / 2, (H - img.height * k) / 2, img.width * k, img.height * k);
+    x.fillStyle = "rgba(5,8,20,0.35)"; x.fillRect(0, 0, W, H);
+    FOOT = c;
+}
+function drawFootage(ctx, L, t) {
+    let M = [1, 0, 0, 1, 0, 0];
+    for (const fx of L.property("ADBE Effect Parade").children) if (fx.matchName === "ADBE Geometry2") {
+        const g = n => fx.property("ADBE Geometry2-" + n);
+        const an = g("0001").value || [W / 2, H / 2], po = g("0002").value || an;
+        const sc = g("0003").expression ? val(g("0003"), L, t, { value: 100 }) : 100;
+        M = mat(trs(po, 0, [sc / 100, sc / 100], an), M);
+    }
+    ctx.save(); ctx.setTransform(...M); ctx.drawImage(FOOT, 0, 0); ctx.restore();
+}
+
 // ---------- background: dark red grid, like the Zelimkhan reel ----------
 function background() {
     const c = createCanvas(W, H), x = c.getContext("2d");
@@ -289,6 +326,7 @@ async function main() {
                 l.property("ADBE Effect Parade").children.map(e => e.name).join(", ") : ""));
         fs.writeFileSync(path.join(out, "layers.txt"), sum.join("\n") + "\n");
     }
+    if (comp.layerList.some(l => l.footage)) await loadFootage();
     const bg = background(), frame = createCanvas(W, H), ctx = frame.getContext("2d");
     const n = Math.round(comp.duration * FPS);
     // motion blur like AE with the plugin's settings: shutter 180°, phase -90° -> open from t-¼ to t+¼ frame; 4 subframes
@@ -298,7 +336,8 @@ async function main() {
         for (let i = comp.layerList.length - 1; i >= 0; i--) { // bottom to top
             const L = comp.layerList[i];
             if (!L.enabled || t < L.inPoint || t >= L.outPoint) continue;
-            if (L.kind === "text") drawText(ctx, L, t);
+            if (L.footage) drawFootage(ctx, L, t);
+            else if (L.kind === "text") drawText(ctx, L, t);
             else if (L.adjustmentLayer) applyAdjust(ctx, L, t, frame);
         }
     };

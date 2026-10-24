@@ -147,9 +147,11 @@
         flick: { name: "Мерцание (flicker)",        per: true,  dur: 0.35, ease: 4, scale: 100, opacity: 0, pos: [0, 0],  blur: 0 },
         glitch:{ name: "Глитч (акцент)",            per: false, dur: 0.30, ease: 5, scale: 100, opacity: 0, pos: [90, 0], blur: 6, stagger: 0.03 },
         // storytelling passport: each word 0.45 s, blur 14 -> 0, rises 40 px, fades in
-        soft:  { name: "Кино: из размытия вверх",   per: true,  dur: 0.45, ease: 3, scale: 100, opacity: 0, pos: [0, 40], blur: 14 }
+        soft:  { name: "Кино: из размытия вверх",   per: true,  dur: 0.45, ease: 3, scale: 100, opacity: 0, pos: [0, 40], blur: 14 },
+        // Devin Jatho captions: the whole phrase pops 80 -> ~105 -> 100 % in 6 frames, phrases change on a hard cut
+        jpop:  { name: "Поп фразой (Jatho)",        per: false, dur: 0.2,  ease: 1, scale: 80,  opacity: 0, pos: [0, 0],  blur: 0, stagger: 0 }
     };
-    var STYLE_KEYS = ["mix", "pop", "slide", "blur", "cut", "rise", "flick", "punch", "glitch", "soft"];
+    var STYLE_KEYS = ["mix", "pop", "slide", "blur", "cut", "rise", "flick", "punch", "glitch", "soft", "jpop"];
     var MIX = ["pop", "slide", "blur", "cut", "rise", "flick", "soft"];
     var HOT = ["punch", "glitch"];
 
@@ -410,7 +412,8 @@
             // fit: measured before any animator exists, so allow for the karaoke (104%) and accent (112%) growth added later;
             // wider than 90% of the frame -> the layer's own scale shrinks it
             var grow = 1.04, rc = layer.sourceRectAtTime(t0, false);
-            if (!plan) for (j = 0; j < p.length; j++) if (p[j].accent) grow = 1.04 * 1.12;
+            var accS = opt.accentScale || 112;
+            if (!plan) for (j = 0; j < p.length; j++) if (p[j].accent) grow = 1.04 * accS / 100;
             var fit = rc.width * grow > comp.width * 0.9 ? comp.width * 0.9 / (rc.width * grow) * 100 : 100;
 
             var more = layer.property("ADBE Text Properties").property("ADBE Text More Options");
@@ -419,7 +422,7 @@
 
             addAnimator(layer, "Base color", { "ADBE Text Fill Color": C + '.effect("Text")(1)' }, null);
             var accP = { "ADBE Text Fill Color": C + '.effect("Accent")(1)' };
-            if (!plan) accP["ADBE Text Scale 3D"] = [112, 112, 100]; // a hero word is already big
+            if (!plan && accS !== 100) accP["ADBE Text Scale 3D"] = [accS, accS, 100]; // a hero word is already big
             addAnimator(layer, "Accent", accP, accentExpr(A));
             addAnimator(layer, "Highlight", { "ADBE Text Fill Color": C + '.effect("Highlight")(1)', "ADBE Text Scale 3D": [104, 104, 100] }, highlightExpr(S));
             var rv = {};
@@ -466,6 +469,10 @@
                 sh.property("ADBE Drop Shadow-0005").setValue(Math.round(opt.size * 0.25));
             }
             made++;
+        }
+        if (opt.zoomLayer) {
+            var M = accentMoments(ph, offset, comp.duration);
+            addPunchZoom(comp, opt.zoomLayer, M.A, M.B, { amt: opt.zoomAmt, dur: opt.zoomDur, faceY: 0.35, blur: opt.mblur });
         }
         ctrl.moveToBeginning();
         return made;
@@ -582,11 +589,86 @@
         if (o.keepSubs) { // shake the picture, not the captions: sit right under the subtitle layers
             for (var i = 2; i <= comp.numLayers; i++) {
                 var x = comp.layer(i);
-                if (x.comment !== TAG) { if (i > 2) L.moveBefore(x); break; }
+                if (x.comment.indexOf(TAG) !== 0) { if (i > 2) L.moveBefore(x); break; } // captions and hook titles stay still
             }
         }
         o.mirror = true; addShake(comp, L, o);
         return L;
+    }
+
+    // ---------- Jatho kit ----------
+    // Punch-in of the footage on accent words: from each accent to the next phrase the frame sits Z % closer to the face.
+    // D = 0 jumps like a cut (his usual), D > 0 eases out over D seconds.
+    function punchZoomExpr(A, B, Z, D) {
+        return "var A=" + arr(A) + ",B=" + arr(B) + ",Z=" + Z + ",D=" + D + ",s=0;\n" +
+            "for(var i=0;i<A.length;i++)if(time>=A[i]&&time<B[i]){var p=D>0?Math.min(1,(time-A[i])/D):1;s=Z*(1-Math.pow(1-p,3));}\n" +
+            "value+s";
+    }
+
+    function addPunchZoom(comp, layer, A, B, o) {
+        var fxs = layer.property("ADBE Effect Parade"), i;
+        for (i = fxs.numProperties; i >= 1; i--) if (fxs.property(i).name === "Punch zoom") fxs.property(i).remove();
+        var tf = fxs.addProperty("ADBE Geometry2"); tf.name = "Punch zoom";
+        var w = layer.width || comp.width, h = layer.height || comp.height, face = [w / 2, h * o.faceY];
+        tf.property("ADBE Geometry2-0001").setValue(face); tf.property("ADBE Geometry2-0002").setValue(face);
+        tf.property("ADBE Geometry2-0003").expression = punchZoomExpr(A, B, o.amt, o.dur);
+        if (o.blur) { tf.property("ADBE Geometry2-0009").setValue(0); tf.property("ADBE Geometry2-0010").setValue(180); }
+        return tf;
+    }
+
+    // accent moments of the built phrases: the accent word, else the start of a "!" line; held until the next phrase
+    function accentMoments(ph, offset, compDur) {
+        var A = [], B = [], i, j;
+        for (i = 0; i < ph.length; i++) {
+            if (!phraseInfo(ph, i).hot) continue;
+            var t = offset + ph[i][0].start;
+            for (j = 0; j < ph[i].length; j++) if (ph[i][j].accent) { t = offset + ph[i][j].start; break; }
+            A.push(t); B.push(i + 1 < ph.length ? offset + ph[i + 1][0].start : compDur);
+        }
+        return { A: A, B: B };
+    }
+
+    // pop-in on a layer's own scale: from F % to 100 with out-back (overshoot c), opacity in over the first frames
+    function popInScale(t0, F, d, c) {
+        return "var t=time-" + (Math.round(t0 * 1000) / 1000) + ",p=Math.max(0,Math.min(1,t/" + d + ")),q=p-1,c=" + c + ";\n" +
+            "var e=1+(c+1)*q*q*q+c*q*q,s=(" + F + "+(100-" + F + ")*e)/100;[value[0]*s,value[1]*s]";
+    }
+
+    // Two-tone hook title: line 1 white, line 2 in colour with a glow of the same colour. Measured on his reels:
+    // widths ~82 % / ~88 % of the frame, line 2 lands 4 frames later from 125 % with a slight undershoot.
+    function addHookTitle(comp, o) {
+        var fr = comp.frameDuration, made = [], k, y = comp.height * o.y;
+        var spec = [{ text: o.l1, col: [1, 1, 1], w: 0.82, from: 115, delay: 0, d: 4 * fr, c: 0 },
+            { text: o.l2, col: o.color, w: 0.88, from: 125, delay: 4 * fr, d: 7 * fr, c: 1.2 }];
+        for (k = 0; k < 2; k++) {
+            var S = spec[k]; if (!S.text) continue;
+            var L = comp.layers.addText(String(S.text).toUpperCase());
+            L.name = "HOOK " + (k + 1) + ": " + S.text; L.comment = TAG + "-hook";
+            L.startTime = 0; L.inPoint = o.t0 + S.delay; L.outPoint = Math.min(comp.duration, o.t0 + o.dur);
+            var sp = L.property("ADBE Text Properties").property("ADBE Text Document"), td = sp.value;
+            td.resetCharStyle(); td.resetParagraphStyle();
+            td.font = o.font; td.fontSize = 120; td.fillColor = S.col; td.applyStroke = false;
+            td.justification = ParagraphJustification.CENTER_JUSTIFY; sp.setValue(td);
+            var rc = L.sourceRectAtTime(L.inPoint, false), sc = rc.width ? comp.width * S.w / rc.width * 100 : 100;
+            var h = rc.height * sc / 100;
+            // o.y is the seam between the lines: line 1 sits above it, line 2 below, 12 px apart
+            if (k === 0) y -= h / 2 + 6; else if (made.length) y += 6 + h / 2;
+            var tr = L.property("ADBE Transform Group");
+            tr.property("ADBE Anchor Point").expression = "var r=sourceRectAtTime(inPoint,false);[r.left+r.width/2,r.top+r.height/2]";
+            tr.property("ADBE Position").setValue([comp.width / 2, y]);
+            tr.property("ADBE Scale").setValue([sc, sc]);
+            tr.property("ADBE Scale").expression = popInScale(L.inPoint, S.from, S.d, S.c);
+            tr.property("ADBE Opacity").expression = "linear(time,inPoint,inPoint+" + (4 * fr) + ",0,100)";
+            var sh = L.property("ADBE Effect Parade").addProperty("ADBE Drop Shadow");
+            sh.property("ADBE Drop Shadow-0004").setValue(4); sh.property("ADBE Drop Shadow-0005").setValue(10);
+            if (k === 1 && o.glow) {
+                var g = L.property("ADBE Effect Parade").addProperty("ADBE Glo2");
+                try { g.property(2).setValue(40); g.property(3).setValue(45); g.property(4).setValue(1); } catch (e) {}
+            }
+            if (k === 0) y += h / 2 + 6;
+            L.motionBlur = true; made.push(L);
+        }
+        return made;
     }
 
     function removeSubs(comp) {
@@ -597,11 +679,12 @@
         phrasesToText: phrasesToText, textToPhrases: textToPhrases, pickStyles: pickStyles, revealExpr: revealExpr,
         highlightExpr: highlightExpr, accentExpr: accentExpr, wrapLine: wrapLine, STYLES: STYLES,
         pickExits: pickExits, shakeExpr: shakeExpr, punchExpr: punchExpr, typoPlan: typoPlan, typoLayout: typoLayout, heroExpr: heroExpr,
-        buildSubs: buildSubs, shakeFrame: shakeFrame, addShake: addShake, addPunch: addPunch, addGlow: addGlow, addSweep: addSweep, autoAccents: autoAccents, phraseInfo: phraseInfo, shatterMoveExpr: shatterMoveExpr, shatterFadeExpr: shatterFadeExpr, wordExitExpr: wordExitExpr, EXITS: EXITS };
+        buildSubs: buildSubs, shakeFrame: shakeFrame, addHookTitle: addHookTitle, addPunchZoom: addPunchZoom,
+        accentMoments: accentMoments, punchZoomExpr: punchZoomExpr, addShake: addShake, addPunch: addPunch, addGlow: addGlow, addSweep: addSweep, autoAccents: autoAccents, phraseInfo: phraseInfo, shatterMoveExpr: shatterMoveExpr, shatterFadeExpr: shatterFadeExpr, wordExitExpr: wordExitExpr, EXITS: EXITS };
     if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
 
     // ---------- UI ----------
-    var SEC = "CaptionAE", words = [], offset = 0;
+    var SEC = "CaptionAE", words = [], offset = 0, srcLayerName = "";
     var scriptDir = File($.fileName).parent;
 
     function pref(k, d) { return app.settings.haveSetting(SEC, k) ? app.settings.getSetting(SEC, k) : d; }
@@ -673,8 +756,8 @@
 
     var g3 = tSub.add("panel", undefined, "3. Стиль"); g3.alignChildren = ["fill", "top"];
     var rP = g3.add("group"); rP.add("statictext", undefined, "Пресет");
-    var PRESETS = ["Свои настройки", "Сторителлинг — сдержанно", "Динамично (TikTok)"];
-    var ddPreset = rP.add("dropdownlist", undefined, PRESETS); ddPreset.selection = Math.min(+pref("preset", "1"), 2);
+    var PRESETS = ["Свои настройки", "Сторителлинг — сдержанно", "Динамично (TikTok)", "Jatho — эксперт"];
+    var ddPreset = rP.add("dropdownlist", undefined, PRESETS); ddPreset.selection = Math.min(+pref("preset", "1"), PRESETS.length - 1);
     var names = ["Микс (разная анимация, акценты — удар/глитч)"];
     for (var si = 1; si < STYLE_KEYS.length; si++) names.push(STYLES[STYLE_KEYS[si]].name);
     var rS = g3.add("group"); rS.add("statictext", undefined, "Появление");
@@ -727,6 +810,8 @@
     var eHl = r3c.add("edittext", undefined, pref("hl", "FFD400")); eHl.characters = 7;
     r3c.add("statictext", undefined, "Акцент #");
     var eAcc = r3c.add("edittext", undefined, pref("acc", "FFFFFF")); eAcc.characters = 7;
+    r3c.add("statictext", undefined, "крупнее, %");
+    var eAccS = r3c.add("edittext", undefined, pref("accS", "112")); eAccS.characters = 4;
     var r3d = g3.add("group");
     var cKara = r3d.add("checkbox", undefined, "Караоке-подсветка"); cKara.value = pref("kara", "0") === "1";
     var cUpper = r3d.add("checkbox", undefined, "КАПС"); cUpper.value = pref("upper", "0") === "1";
@@ -734,6 +819,11 @@
     var cShadow = r3d.add("checkbox", undefined, "Тень"); cShadow.value = pref("shadow", "1") === "1";
     var cMblur = g3.add("checkbox", undefined, "Motion blur (плавнее движение, рендер дольше)"); cMblur.value = pref("mblur", "1") === "1";
     var cHotHit = g3.add("checkbox", undefined, "Акцентные фразы: толчок + тряска на акцентном слове"); cHotHit.value = pref("hotHit", "0") === "1";
+    var rz = g3.add("group");
+    var cZoom = rz.add("checkbox", undefined, "Панч-зум видео на акцентах"); cZoom.value = pref("zoom", "0") === "1";
+    var eZoom = rz.add("edittext", undefined, pref("zoomAmt", "12")); eZoom.characters = 3;
+    rz.add("statictext", undefined, "%");
+    var ddZoomKind = rz.add("dropdownlist", undefined, ["скачком", "плавно"]); ddZoomKind.selection = +pref("zoomKind", "0");
 
     var g5 = tSub.add("panel", undefined, "4. Типографика и свет"); g5.alignChildren = ["left", "top"];
     var TYPO = [["plain", "Одинаковая"], ["all", "Разная во всех фразах"], ["mix", "Микс: разная на акцентах и каждой 3-й фразе"],
@@ -764,6 +854,11 @@
         }, {
             style: "pop", exit: "fade", font: "Montserrat-ExtraBold", size: 80, kara: true, upper: true, stroke: true, shadow: true,
             hotHit: true, acc: "FFFFFF", typo: "plain", font2: "PlayfairDisplay-Black", big: 160, small: 100, glow: 0, sweep: 0, heroUp: true, heroFly: false
+        }, {
+            // Devin Jatho: white bold caps with a thin outline at Y≈1450, phrase pops, accent word red, punch-in on accents
+            style: "jpop", exit: "fade", font: "Montserrat-ExtraBold", size: 92, kara: false, upper: true, stroke: true, shadow: true,
+            hotHit: false, acc: "E51926", typo: "plain", font2: "PlayfairDisplay-Black", big: 160, small: 100, glow: 0, sweep: 0, heroUp: true, heroFly: false,
+            display: "whole", posY: 75, words: 3, zoom: true, accS: 100
         }][k];
         if (!P) return;
         ddStyle.selection = STYLE_KEYS.indexOf(P.style); ddExit.selection = EXIT_KEYS.indexOf(P.exit);
@@ -771,7 +866,9 @@
         cShadow.value = P.shadow; cHotHit.value = P.hotHit; eAcc.text = P.acc; eHl.text = "F7D640";
         for (var i = 0; i < TYPO.length; i++) if (TYPO[i][0] === P.typo) ddTypo.selection = i;
         eFont2.text = P.font2; eBig.text = P.big; eSmall.text = P.small; ddGlow.selection = P.glow; ddSweep.selection = P.sweep;
-        cHeroUp.value = P.heroUp; cHeroFly.value = P.heroFly; cMblur.value = true;
+        cHeroUp.value = P.heroUp; cHeroFly.value = P.heroFly; cMblur.value = true; cZoom.value = !!P.zoom;
+        ePos.text = P.posY || 72; eWords.text = P.words || 3; eAccS.text = P.accS || 112;
+        for (i = 0; i < DISPLAY.length; i++) if (DISPLAY[i][0] === (P.display || "flow")) ddDisplay.selection = i;
     }
     ddPreset.onChange = function () { if (ddPreset.selection) applyPreset(ddPreset.selection.index); };
 
@@ -872,6 +969,33 @@
         app.endUndoGroup();
     };
 
+    var gk = tHit.add("panel", undefined, "Заголовок-хук (две строки, как у Jatho)"); gk.alignChildren = ["left", "top"];
+    var k1 = gk.add("group"); k1.add("statictext", undefined, "Строка 1 (белая)");
+    var eL1 = k1.add("edittext", undefined, pref("hk1", "SAME VIDEO BUT")); eL1.characters = 22;
+    var k2 = gk.add("group"); k2.add("statictext", undefined, "Строка 2 (цвет)");
+    var eL2 = k2.add("edittext", undefined, pref("hk2", "125X VIEWS")); eL2.characters = 22;
+    var HOOK_COL = [["красный — проблема", "E51926"], ["зелёный — успех", "39E75F"], ["жёлтый", "FFD400"], ["фиолетовый — бренд", "A855F7"], ["голубой — цифры", "22D3EE"]];
+    var hcNames = []; for (si = 0; si < HOOK_COL.length; si++) hcNames.push(HOOK_COL[si][0]);
+    var k3 = gk.add("group"); k3.add("statictext", undefined, "Цвет");
+    var ddHC = k3.add("dropdownlist", undefined, hcNames); ddHC.selection = +pref("hkCol", "0");
+    var k4 = gk.add("group");
+    k4.add("statictext", undefined, "Длительность, с"); var eHkDur = k4.add("edittext", undefined, pref("hkDur", "1.8")); eHkDur.characters = 4;
+    k4.add("statictext", undefined, "Высота, % кадра"); var eHkY = k4.add("edittext", undefined, pref("hkY", "40")); eHkY.characters = 4;
+    var cHkGlow = gk.add("checkbox", undefined, "Свечение цветной строки"); cHkGlow.value = pref("hkGlow", "1") === "1";
+    var bHook = gk.add("button", undefined, "Добавить заголовок с текущего кадра");
+    bHook.onClick = function () {
+        var comp = activeComp(); if (!comp) return;
+        var keep = { hk1: eL1.text, hk2: eL2.text, hkCol: ddHC.selection.index, hkDur: eHkDur.text, hkY: eHkY.text, hkGlow: cHkGlow.value ? 1 : 0 };
+        for (var k in keep) setPref(k, keep[k]);
+        app.beginUndoGroup("Caption AE: заголовок");
+        try {
+            addHookTitle(comp, { l1: eL1.text, l2: eL2.text, color: hex(HOOK_COL[ddHC.selection.index][1]), t0: comp.time,
+                dur: Math.max(0.3, +eHkDur.text || 1.8), y: (+eHkY.text || 40) / 100, font: "Montserrat-ExtraBold", glow: cHkGlow.value });
+            status.text = "Заголовок добавлен: слои HOOK 1 / HOOK 2.";
+        } catch (e) { alert("Ошибка: " + e + " (строка " + e.line + ")"); }
+        app.endUndoGroup();
+    };
+
     function eachSelected(name, fn) {
         var comp = activeComp(); if (!comp) return;
         var sel = comp.selectedLayers, i;
@@ -913,6 +1037,7 @@
         if (!out.exists) { alert("Распознавание не удалось:\n" + log); status.text = "Ошибка распознавания."; return; }
         words = parseJSONWords(readFile(out));
         offset = L.startTime; // word times are from the file start; the layer may be shifted in the comp
+        srcLayerName = L.name;
         regroup();
     };
 
@@ -941,15 +1066,22 @@
             style: STYLE_KEYS[ddStyle.selection.index], exit: EXIT_KEYS[ddExit.selection.index], mblur: cMblur.value, font: eFont.text, size: +eSize.text || 90,
             posY: (+ePos.text || 72) / 100, maxChars: +eChars.text || 18, hold: 0.4,
             hl: hex(eHl.text.replace("#", "")), accent: hex(eAcc.text.replace("#", "")),
-            karaoke: cKara.value, upper: cUpper.value, stroke: cStroke.value, shadow: cShadow.value
+            karaoke: cKara.value, upper: cUpper.value, stroke: cStroke.value, shadow: cShadow.value,
+            accentScale: +eAccS.text || 112, zoomAmt: +eZoom.text || 12, zoomDur: ddZoomKind.selection.index ? 4 * comp.frameDuration : 0
         };
+        if (cZoom.value) { // the clip that was transcribed, else the selected footage layer
+            var zl = srcLayerName ? comp.layer(srcLayerName) : null, sl = comp.selectedLayers;
+            for (var si2 = 0; !zl && si2 < sl.length; si2++) if (sl[si2].source && sl[si2].comment.indexOf(TAG) !== 0) zl = sl[si2];
+            if (zl) opt.zoomLayer = zl; else { alert("Для панч-зума выделите слой с видео."); return; }
+        }
         var keep = { maxWords: eWords.text, maxChars: eChars.text, style: ddStyle.selection.index, exit: ddExit.selection.index,
             mblur: cMblur.value ? 1 : 0, enIn: checkedKeys(cbIn, MIX_UI).list, enOut: checkedKeys(cbOut, EXIT_UI).list,
             smart: cSmart.value ? 1 : 0, display: ddDisplay.selection.index, hotHit: cHotHit.value ? 1 : 0, typo: ddTypo.selection.index, font2: eFont2.text,
             bigPct: eBig.text, smallPct: eSmall.text, glow: ddGlow.selection.index, sweep: ddSweep.selection.index,
             heroUp: cHeroUp.value ? 1 : 0, heroFly: cHeroFly.value ? 1 : 0, preset: ddPreset.selection.index, voice: cVoice.value ? 1 : 0, thr: eThr.text, font: eFont.text, size: eSize.text,
             posY: ePos.text, hl: eHl.text, acc: eAcc.text, kara: cKara.value ? 1 : 0, upper: cUpper.value ? 1 : 0,
-            stroke: cStroke.value ? 1 : 0, shadow: cShadow.value ? 1 : 0 };
+            stroke: cStroke.value ? 1 : 0, shadow: cShadow.value ? 1 : 0,
+            zoom: cZoom.value ? 1 : 0, zoomAmt: eZoom.text, accS: eAccS.text, zoomKind: ddZoomKind.selection.index };
         for (var k in keep) setPref(k, keep[k]);
         app.beginUndoGroup("Caption AE: создать");
         try {
