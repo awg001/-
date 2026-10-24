@@ -742,72 +742,77 @@
     var tPlain = tabs.add("tab", undefined, "Простые субтитры"); tPlain.alignChildren = ["fill", "top"];
     var tShake = tabs.add("tab", undefined, "Тряска"); tShake.alignChildren = ["fill", "top"];
     var tHit = tabs.add("tab", undefined, "Акцент-эффекты"); tHit.alignChildren = ["fill", "top"];
-    var g1 = tSub.add("panel", undefined, "1. Текст"); g1.alignChildren = ["fill", "top"];
+    // Compact layout: text + preset + buttons always visible; fine-tuning folds away under «Настройки ▸»,
+    // and the «Микс» checklist shows only while a Mix is chosen. Hidden controls get zero size so they take no room.
+    function showCtl(c, on) { c.visible = on; c.maximumSize = on ? [4000, 4000] : [0, 0]; }
+    function relayout() { try { win.layout.layout(true); win.layout.resize(); } catch (eLay) {} }
+
+    var g1 = tSub.add("panel", undefined, "Текст"); g1.alignChildren = ["fill", "top"]; g1.spacing = 4;
     var r1 = g1.add("group");
     var bTrans = r1.add("button", undefined, "Распознать речь слоя");
     var bImport = r1.add("button", undefined, "Импорт SRT / JSON");
-    var r1b = g1.add("group");
-    r1b.add("statictext", undefined, "Язык");
-    var ddLang = r1b.add("dropdownlist", undefined, ["ru", "en", "auto"]); ddLang.selection = 0;
-    r1b.add("statictext", undefined, "Модель");
-    var ddModel = r1b.add("dropdownlist", undefined, ["small", "medium", "large-v3"]);
+    var ddLang = r1.add("dropdownlist", undefined, ["ru", "en", "auto"]); ddLang.selection = 0;
+    var ddModel = r1.add("dropdownlist", undefined, ["small", "medium", "large-v3"]);
     ddModel.selection = { small: 0, medium: 1, "large-v3": 2 }[pref("model", "small")] || 0;
-    var r1c = g1.add("group");
-    r1c.add("statictext", undefined, "Python");
-    var ePy = r1c.add("edittext", undefined, pref("python", defaultPython())); ePy.characters = 26;
-
     var editor = g1.add("edittext", undefined, "", { multiline: true, scrolling: true });
-    editor.preferredSize = [380, 220];
-    g1.add("statictext", undefined, "Строка = фраза на экране. Правьте слова, Enter делит фразу, *слово* = акцент.", { multiline: true });
+    editor.preferredSize = [380, 130];
+    g1.add("statictext", undefined, "Строка = фраза. Enter делит фразу, *слово* = акцент.");
 
-    var g2 = tSub.add("panel", undefined, "2. Показ и разбивка"); g2.alignChildren = ["left", "top"];
-    var DISPLAY = [["flow", "Фраза: слова появляются по мере речи"], ["single", "По одному слову (слово сменяет слово)"],
-        ["whole", "Фраза целиком сразу"], ["block", "Блок из 2 строк: слова по мере речи"]];
-    var dNames = []; for (var di = 0; di < DISPLAY.length; di++) dNames.push(DISPLAY[di][1]);
-    var ddDisplay = g2.add("dropdownlist", undefined, dNames); ddDisplay.selection = Math.min(+pref("display", "0"), DISPLAY.length - 1);
-    var g2r = g2.add("group");
-    g2r.add("statictext", undefined, "Слов в строке до");
-    var eWords = g2r.add("edittext", undefined, pref("maxWords", "3")); eWords.characters = 3;
-    g2r.add("statictext", undefined, "Букв до");
-    var eChars = g2r.add("edittext", undefined, pref("maxChars", "18")); eChars.characters = 3;
-    var bRegroup = g2r.add("button", undefined, "Разбить заново");
-
-    var g3 = tSub.add("panel", undefined, "3. Стиль"); g3.alignChildren = ["fill", "top"];
-    var rP = g3.add("group"); rP.add("statictext", undefined, "Пресет");
+    var r4 = tSub.add("group"); r4.alignment = ["fill", "top"];
+    r4.add("statictext", undefined, "Пресет");
     var PRESETS = ["Свои настройки", "Сторителлинг — сдержанно", "Динамично (TikTok)", "Jatho — эксперт", "Простые субтитры"];
-    var ddPreset = rP.add("dropdownlist", undefined, PRESETS); ddPreset.selection = Math.min(+pref("preset", "1"), PRESETS.length - 1);
-    var names = ["Микс (разная анимация, акценты — удар/глитч)"];
+    var ddPreset = r4.add("dropdownlist", undefined, PRESETS); ddPreset.selection = Math.min(+pref("preset", "1"), PRESETS.length - 1);
+    var r4b = tSub.add("group"); r4b.alignment = ["fill", "top"];
+    var bBuild = r4b.add("button", undefined, "Создать субтитры");
+    var bRemove = r4b.add("button", undefined, "Удалить");
+    var bSet = r4b.add("button", undefined, "Настройки ▸");
+
+    // ---------- fine-tuning (folded by default) ----------
+    var sett = tSub.add("group"); sett.orientation = "column"; sett.alignChildren = ["fill", "top"]; sett.spacing = 6;
+    var r1c = sett.add("group");
+    r1c.add("statictext", undefined, "Python");
+    var ePy = r1c.add("edittext", undefined, pref("python", defaultPython())); ePy.characters = 30;
+
+    var g2 = sett.add("panel", undefined, "Разбивка"); g2.alignChildren = ["left", "top"];
+    var DISPLAY = [["flow", "По мере речи"], ["single", "По одному слову"], ["whole", "Фраза целиком"], ["block", "Блок 2 строки"]];
+    var dNames = []; for (var di = 0; di < DISPLAY.length; di++) dNames.push(DISPLAY[di][1]);
+    var g2r = g2.add("group");
+    var ddDisplay = g2r.add("dropdownlist", undefined, dNames); ddDisplay.selection = Math.min(+pref("display", "0"), DISPLAY.length - 1);
+    g2r.add("statictext", undefined, "Слов");
+    var eWords = g2r.add("edittext", undefined, pref("maxWords", "3")); eWords.characters = 2;
+    g2r.add("statictext", undefined, "Букв");
+    var eChars = g2r.add("edittext", undefined, pref("maxChars", "18")); eChars.characters = 3;
+    var bRegroup = g2r.add("button", undefined, "Разбить");
+
+    var g3 = sett.add("panel", undefined, "Стиль"); g3.alignChildren = ["left", "top"]; g3.spacing = 4;
+    var names = ["Микс"];
     for (var si = 1; si < STYLE_KEYS.length; si++) names.push(STYLES[STYLE_KEYS[si]].name);
+    var exNames = ["Микс"];
+    for (si = 1; si < EXIT_KEYS.length; si++) exNames.push(EXITS[EXIT_KEYS[si]].name);
     var rS = g3.add("group"); rS.add("statictext", undefined, "Появление");
     var ddStyle = rS.add("dropdownlist", undefined, names); ddStyle.selection = Math.min(+pref("style", String(STYLE_KEYS.indexOf("soft"))), names.length - 1); // default = storytelling preset
-    var exNames = ["Микс (акценты — распад)"];
-    for (si = 1; si < EXIT_KEYS.length; si++) exNames.push(EXITS[EXIT_KEYS[si]].name);
     var rE = g3.add("group"); rE.add("statictext", undefined, "Уход");
     var ddExit = rE.add("dropdownlist", undefined, exNames); ddExit.selection = Math.min(+pref("exit", String(EXIT_KEYS.indexOf("soft"))), exNames.length - 1);
 
-    var gm = g3.add("panel", undefined, "Что разрешено «Миксу»"); gm.alignChildren = ["left", "top"];
+    var gm = g3.add("panel", undefined, "Что разрешено «Миксу»"); gm.alignChildren = ["left", "top"]; gm.spacing = 2;
     var MIX_UI = [["pop", "Pop"], ["slide", "Выезд"], ["blur", "Размытие"], ["cut", "Рубленый"], ["rise", "Подъём"],
         ["flick", "Мерцание"], ["punch", "Удар"], ["glitch", "Глитч"], ["soft", "Кино"]];
     var EXIT_UI = [["fade", "Затухание"], ["shatter", "Распад"], ["up", "Вылет"], ["blurout", "Размытие"], ["flick", "Мерцание"], ["soft", "Мягкий"]];
     var onIn = "," + pref("enIn", "pop,slide,blur,cut,rise,flick,punch,glitch,soft") + ",";
     var onOut = "," + pref("enOut", "fade,shatter,up,blurout,flick,soft") + ",";
     var cbIn = [], cbOut = [], row, ci;
-    gm.add("statictext", undefined, "Появление:");
     for (ci = 0; ci < MIX_UI.length; ci++) {
-        if (ci % 4 === 0) row = gm.add("group");
+        if (ci % 5 === 0) { row = gm.add("group"); if (!ci) row.add("statictext", undefined, "Вход:"); }
         cbIn.push(row.add("checkbox", undefined, MIX_UI[ci][1])); cbIn[ci].value = onIn.indexOf("," + MIX_UI[ci][0] + ",") >= 0;
     }
-    gm.add("statictext", undefined, "Уход:");
-    row = gm.add("group");
     for (ci = 0; ci < EXIT_UI.length; ci++) {
+        if (ci % 5 === 0) { row = gm.add("group"); if (!ci) row.add("statictext", undefined, "Уход:"); }
         cbOut.push(row.add("checkbox", undefined, EXIT_UI[ci][1])); cbOut[ci].value = onOut.indexOf("," + EXIT_UI[ci][0] + ",") >= 0;
     }
-    var cSmart = gm.add("checkbox", undefined, "Умный подбор: паузы, вопросы, темп речи, конец предложения");
-    cSmart.value = pref("smart", "1") === "1";
     var rv = gm.add("group");
-    var cVoice = rv.add("checkbox", undefined, "Акценты по голосу: громче на"); cVoice.value = pref("voice", "1") === "1";
-    var eThr = rv.add("edittext", undefined, pref("thr", "5")); eThr.characters = 3;
-    rv.add("statictext", undefined, "дБ");
+    var cSmart = rv.add("checkbox", undefined, "Умный подбор"); cSmart.value = pref("smart", "1") === "1";
+    var cVoice = rv.add("checkbox", undefined, "Акценты по голосу, дБ"); cVoice.value = pref("voice", "1") === "1";
+    var eThr = rv.add("edittext", undefined, pref("thr", "5")); eThr.characters = 2;
 
     function checkedKeys(cbs, ui) {
         var en = {}, list = [], i;
@@ -816,53 +821,58 @@
         return en;
     }
     var r3 = g3.add("group");
-    r3.add("statictext", undefined, "Шрифт (PostScript)");
+    r3.add("statictext", undefined, "Шрифт");
     var eFont = r3.add("edittext", undefined, pref("font", "PlayfairDisplay-Regular")); eFont.characters = 18;
-    var r3b = g3.add("group");
-    r3b.add("statictext", undefined, "Размер");
-    var eSize = r3b.add("edittext", undefined, pref("size", "74")); eSize.characters = 4;
-    r3b.add("statictext", undefined, "Высота, % кадра");
-    var ePos = r3b.add("edittext", undefined, pref("posY", "72")); ePos.characters = 4;
+    r3.add("statictext", undefined, "Размер");
+    var eSize = r3.add("edittext", undefined, pref("size", "74")); eSize.characters = 3;
+    r3.add("statictext", undefined, "Высота %");
+    var ePos = r3.add("edittext", undefined, pref("posY", "72")); ePos.characters = 3;
     var r3c = g3.add("group");
     r3c.add("statictext", undefined, "Подсветка #");
-    var eHl = r3c.add("edittext", undefined, pref("hl", "FFD400")); eHl.characters = 7;
+    var eHl = r3c.add("edittext", undefined, pref("hl", "FFD400")); eHl.characters = 6;
     r3c.add("statictext", undefined, "Акцент #");
-    var eAcc = r3c.add("edittext", undefined, pref("acc", "FFFFFF")); eAcc.characters = 7;
-    r3c.add("statictext", undefined, "крупнее, %");
-    var eAccS = r3c.add("edittext", undefined, pref("accS", "112")); eAccS.characters = 4;
+    var eAcc = r3c.add("edittext", undefined, pref("acc", "FFFFFF")); eAcc.characters = 6;
+    r3c.add("statictext", undefined, "крупнее %");
+    var eAccS = r3c.add("edittext", undefined, pref("accS", "112")); eAccS.characters = 3;
     var r3d = g3.add("group");
-    var cKara = r3d.add("checkbox", undefined, "Караоке-подсветка"); cKara.value = pref("kara", "0") === "1";
+    var cKara = r3d.add("checkbox", undefined, "Караоке"); cKara.value = pref("kara", "0") === "1";
     var cUpper = r3d.add("checkbox", undefined, "КАПС"); cUpper.value = pref("upper", "0") === "1";
     var cStroke = r3d.add("checkbox", undefined, "Обводка"); cStroke.value = pref("stroke", "0") === "1";
     var cShadow = r3d.add("checkbox", undefined, "Тень"); cShadow.value = pref("shadow", "1") === "1";
-    var cMblur = g3.add("checkbox", undefined, "Motion blur (плавнее движение, рендер дольше)"); cMblur.value = pref("mblur", "1") === "1";
-    var cHotHit = g3.add("checkbox", undefined, "Акцентные фразы: толчок + тряска на акцентном слове"); cHotHit.value = pref("hotHit", "0") === "1";
+    var cMblur = r3d.add("checkbox", undefined, "Motion blur"); cMblur.value = pref("mblur", "1") === "1";
     var rz = g3.add("group");
-    var cZoom = rz.add("checkbox", undefined, "Панч-зум видео на акцентах"); cZoom.value = pref("zoom", "0") === "1";
-    var eZoom = rz.add("edittext", undefined, pref("zoomAmt", "12")); eZoom.characters = 3;
+    var cHotHit = rz.add("checkbox", undefined, "Толчок на акцентах"); cHotHit.value = pref("hotHit", "0") === "1";
+    var cZoom = rz.add("checkbox", undefined, "Панч-зум видео"); cZoom.value = pref("zoom", "0") === "1";
+    var eZoom = rz.add("edittext", undefined, pref("zoomAmt", "12")); eZoom.characters = 2;
     rz.add("statictext", undefined, "%");
     var ddZoomKind = rz.add("dropdownlist", undefined, ["скачком", "плавно"]); ddZoomKind.selection = +pref("zoomKind", "0");
 
-    var g5 = tSub.add("panel", undefined, "4. Типографика и свет"); g5.alignChildren = ["left", "top"];
-    var TYPO = [["plain", "Одинаковая"], ["all", "Разная во всех фразах"], ["mix", "Микс: разная на акцентах и каждой 3-й фразе"],
+    var g5 = sett.add("panel", undefined, "Типографика и свет"); g5.alignChildren = ["left", "top"]; g5.spacing = 4;
+    var TYPO = [["plain", "Одинаковая"], ["all", "Разная во всех фразах"], ["mix", "Микс: акценты и каждая 3-я"],
         ["accent", "Только акцентное слово"]];
     var tyNames = []; for (si = 0; si < TYPO.length; si++) tyNames.push(TYPO[si][1]);
-    var t1r = g5.add("group"); t1r.add("statictext", undefined, "Типографика");
-    var ddTypo = t1r.add("dropdownlist", undefined, tyNames); ddTypo.selection = Math.min(+pref("typo", "3"), TYPO.length - 1);
-    var t2r = g5.add("group"); t2r.add("statictext", undefined, "Шрифт крупного слова");
-    var eFont2 = t2r.add("edittext", undefined, pref("font2", "PlayfairDisplay-Black")); eFont2.characters = 18;
-    var t3r = g5.add("group");
-    t3r.add("statictext", undefined, "Крупное, %"); var eBig = t3r.add("edittext", undefined, pref("bigPct", "200")); eBig.characters = 4;
-    t3r.add("statictext", undefined, "Мелкие слова, %"); var eSmall = t3r.add("edittext", undefined, pref("smallPct", "100")); eSmall.characters = 4;
     var LIGHT = [["none", "нет"], ["hot", "на акцентных"], ["all", "на всех"]];
     var lNames = []; for (si = 0; si < LIGHT.length; si++) lNames.push(LIGHT[si][1]);
+    var t1r = g5.add("group");
+    var ddTypo = t1r.add("dropdownlist", undefined, tyNames); ddTypo.selection = Math.min(+pref("typo", "3"), TYPO.length - 1);
+    var cHeroUp = t1r.add("checkbox", undefined, "КАПСОМ"); cHeroUp.value = pref("heroUp", "1") === "1";
+    var cHeroFly = t1r.add("checkbox", undefined, "Влёт 160%"); cHeroFly.value = pref("heroFly", "1") === "1";
+    var t2r = g5.add("group"); t2r.add("statictext", undefined, "Шрифт");
+    var eFont2 = t2r.add("edittext", undefined, pref("font2", "PlayfairDisplay-Black")); eFont2.characters = 15;
+    t2r.add("statictext", undefined, "Крупное %"); var eBig = t2r.add("edittext", undefined, pref("bigPct", "200")); eBig.characters = 3;
+    t2r.add("statictext", undefined, "Мелкие %"); var eSmall = t2r.add("edittext", undefined, pref("smallPct", "100")); eSmall.characters = 3;
     var t4r = g5.add("group");
     t4r.add("statictext", undefined, "Свечение"); var ddGlow = t4r.add("dropdownlist", undefined, lNames); ddGlow.selection = +pref("glow", "0");
     t4r.add("statictext", undefined, "Блик"); var ddSweep = t4r.add("dropdownlist", undefined, lNames); ddSweep.selection = +pref("sweep", "0");
-    var t5r = g5.add("group");
-    var cHeroUp = t5r.add("checkbox", undefined, "Крупное слово КАПСОМ"); cHeroUp.value = pref("heroUp", "1") === "1";
-    var cHeroFly = t5r.add("checkbox", undefined, "Влетает с 160%"); cHeroFly.value = pref("heroFly", "1") === "1";
-    g5.add("statictext", undefined, "Крупное слово = акцент *…*, иначе самое длинное. Мелкие = слова до 3 букв.\nРазные шрифт и размер в одной фразе — AE 2024 и новее.", { multiline: true });
+    g5.add("statictext", undefined, "Крупное = акцент *…* или самое длинное. Разные шрифты в фразе — AE 2024+.");
+
+    function updMix() { showCtl(gm, ddStyle.selection.index === 0 || ddExit.selection.index === 0); relayout(); }
+    ddStyle.onChange = updMix; ddExit.onChange = updMix;
+    var setOpen = pref("setOpen", "0") === "1";
+    function updSet() { showCtl(sett, setOpen); bSet.text = setOpen ? "Настройки ▾" : "Настройки ▸"; relayout(); }
+    bSet.onClick = function () { setOpen = !setOpen; setPref("setOpen", setOpen ? 1 : 0); updSet(); };
+    showCtl(gm, ddStyle.selection.index === 0 || ddExit.selection.index === 0); showCtl(sett, setOpen);
+    bSet.text = setOpen ? "Настройки ▾" : "Настройки ▸";
 
     // presets fill the controls; anything can still be changed by hand afterwards
     function applyPreset(k) {
@@ -892,12 +902,9 @@
         cHeroUp.value = P.heroUp; cHeroFly.value = P.heroFly; cMblur.value = true; cZoom.value = !!P.zoom;
         ePos.text = P.posY || 72; eWords.text = P.words || 3; eAccS.text = P.accS || 112;
         for (i = 0; i < DISPLAY.length; i++) if (DISPLAY[i][0] === (P.display || "flow")) ddDisplay.selection = i;
+        updMix();
     }
     ddPreset.onChange = function () { if (ddPreset.selection) applyPreset(ddPreset.selection.index); };
-
-    var r4 = tSub.add("group"); r4.alignment = ["fill", "top"];
-    var bBuild = r4.add("button", undefined, "Создать субтитры");
-    var bRemove = r4.add("button", undefined, "Удалить субтитры");
     var gs = tShake.add("panel", undefined, "Тряска кадра или слоёв"); gs.alignChildren = ["left", "top"];
     var s1 = gs.add("group"); s1.add("statictext", undefined, "Тип");
     var shNames = []; for (si = 0; si < SHAKE_KEYS.length; si++) shNames.push(SHAKES[SHAKE_KEYS[si]]);

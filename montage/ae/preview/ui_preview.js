@@ -7,7 +7,7 @@ class Ctl {
     constructor(type, parent, text, props) {
         this.type = type; this.parent = parent; this.children = []; this.props = props || {};
         this.items = Array.isArray(text) ? text.slice() : null;
-        this.text = Array.isArray(text) ? "" : (text || ""); this.value = false; this._sel = null;
+        this.text = Array.isArray(text) ? "" : (text || ""); this.value = false; this._sel = null; this.visible = true;
         this.orientation = type === "group" ? "row" : "column";
         this.layout = { layout() {}, resize() {} };
     }
@@ -21,6 +21,7 @@ class Window extends Ctl { constructor(type, title) { super("window", null, titl
 class Panel {}
 
 const settings = {};
+if (process.env.OPEN) settings["CaptionAEsetOpen"] = "1"; // render with «Настройки» unfolded
 const sandbox = {
     Window, Panel, SHOWN,
     app: {
@@ -42,6 +43,7 @@ const win = sandbox.SHOWN[0];
 // ---------- HTML in After Effects' panel style ----------
 const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
 function html(c) {
+    if (c.visible === false) return ""; // folded / hidden controls take no room, as in AE
     const kids = () => c.children.map(html).join("");
     switch (c.type) {
         case "group": return `<div class="g ${c.orientation}">${kids()}</div>`;
@@ -74,7 +76,7 @@ fs.mkdirSync(out, { recursive: true });
 const tp = win.children.find(c => c.type === "tabbedpanel"), status = win.children.find(c => c.type === "statictext");
 tp.children.forEach((tab, i) => {
     const tabs = tp.children.map((t, j) => `<span class="tab${i === j ? " on" : ""}">${esc(t.text)}</span>`).join("");
-    fs.writeFileSync(path.join(out, `tab_${i + 1}.html`), `<!doctype html><meta charset="utf-8"><style>${css}</style>
+    fs.writeFileSync(path.join(out, `tab_${i + 1}${process.env.OPEN && i === 0 ? "_open" : ""}.html`), `<!doctype html><meta charset="utf-8"><style>${css}</style>
 <div class="win"><div class="title">${esc(win.text)}</div><div class="tabs">${tabs}</div><div class="body">${tab.children.map(html).join("")}</div>
 <div class="status">${esc(status ? status.text : "")}</div></div>`);
 });
