@@ -1,5 +1,5 @@
 """Synthesised sound bed matched to render.py timings."""
-import numpy as np, wave
+import os, numpy as np, wave
 
 SR, DUR = 44100, 9.0
 N = int(SR * DUR)
@@ -57,6 +57,8 @@ for i in range(15): add(tick(), 6.0 - .22 + .4 + i * .5 / 15 + rng.uniform(0, .0
 add(hit(50, 1.0), 6.0 - .22 + 1.1, .75)      # УКРАДЕНА
 
 out /= max(1e-6, np.abs(out).max()) / .85
-with wave.open('/tmp/claude-0/-home-user--/187b4d09-cffe-5712-905c-ec1c06a7518e/scratchpad/render/sfx.wav', 'wb') as w:
+dst = os.path.join(os.environ.get('MONTAGE_WORK', os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../../work')), 'mona_lisa')
+os.makedirs(dst, exist_ok=True)
+with wave.open(os.path.join(dst, 'sfx.wav'), 'wb') as w:
     w.setnchannels(2); w.setsampwidth(2); w.setframerate(SR)
     w.writeframes((out * 32767).astype(np.int16).tobytes())

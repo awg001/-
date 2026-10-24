@@ -5,8 +5,9 @@ import numpy as np, cv2
 from PIL import Image, ImageDraw, ImageFont, ImageFilter
 from multiprocessing import Pool
 
-SP = '/tmp/claude-0/-home-user--/187b4d09-cffe-5712-905c-ec1c06a7518e/scratchpad'
-A, FD = f'{SP}/assets', f'{SP}/fonts'
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../..'))
+WORK = os.environ.get('MONTAGE_WORK', f'{ROOT}/work')
+A, FD, OUT = f'{WORK}/assets', f'{WORK}/fonts', f'{WORK}/mona_lisa'
 W, H, FPS, DUR = 1080, 1920, 30, 9.0
 NF = int(DUR * FPS)
 SUB = 4                      # motion-blur subframes
@@ -281,11 +282,11 @@ def render(i):
     fade = clamp((DUR - t) / .3)
     img = (img * fade).clip(0, 1)
     out = (img * 255).astype(np.uint8)
-    cv2.imwrite(f'{SP}/render/frames/{i:04d}.png', cv2.cvtColor(out, cv2.COLOR_RGB2BGR))
+    cv2.imwrite(f'{OUT}/frames/{i:04d}.png', cv2.cvtColor(out, cv2.COLOR_RGB2BGR))
     return i
 
 if __name__ == '__main__':
-    os.makedirs(f'{SP}/render/frames', exist_ok=True)
+    os.makedirs(f'{OUT}/frames', exist_ok=True)
     only = [int(x) for x in sys.argv[1:]] or list(range(NF))
     with Pool(4, initializer=init) as p:
         for i in p.imap_unordered(render, only, chunksize=4):
