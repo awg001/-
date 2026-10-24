@@ -1,0 +1,53 @@
+﻿CAPTION AE — INSTALLING ON WINDOWS
+==================================
+An After Effects panel: animated captions, screen shake, accent effects.
+
+REQUIREMENTS
+• After Effects 2020 or newer. Mixed fonts and sizes inside one caption need AE 2024 or newer.
+• For automatic speech recognition: Python 3.9 or newer (free).
+  Without Python you can still import SRT and use Shake and Accent effects.
+
+STEP 1. COPY THE PLUGIN
+1. Quit After Effects.
+2. Open the folder:
+   C:\Program Files\Adobe\Adobe After Effects <version>\Support Files\Scripts\ScriptUI Panels\
+   (e.g. ...\Adobe After Effects 2025\Support Files\Scripts\ScriptUI Panels\)
+3. Copy BOTH files there: CaptionAE.jsx and transcribe.py.
+   Windows will ask for administrator rights — click "Continue".
+4. Start After Effects → Window menu → CaptionAE.jsx at the bottom of the list.
+   Dock the panel anywhere like any other panel.
+
+Without copying: File → Scripts → Run Script File… → choose CaptionAE.jsx
+(transcribe.py must be in the same folder).
+
+STEP 2. ALLOW THE SCRIPT TO USE FILES
+Edit → Preferences → Scripting & Expressions →
+enable "Allow Scripts to Write Files and Access Network".
+
+STEP 3. SPEECH RECOGNITION (ONCE)
+1. Download Python: https://www.python.org/downloads/windows/
+2. In the installer, TICK "Add python.exe to PATH", then "Install Now".
+3. Double-click install_windows.bat (from this archive) and wait for "Done".
+4. The first recognition downloads the model (~0.5 GB for "small") — internet needed once.
+   After that everything runs offline and free.
+
+HOW TO USE
+1. Open a composition and select the layer with the voice (video or audio).
+2. "Субтитры" (Captions) tab → «Распознать речь слоя» (Transcribe layer). AE freezes while it works — that's normal.
+   Or «Импорт SRT / JSON» (Import SRT / JSON), e.g. an SRT exported from Premiere Pro.
+3. Check the text: one line = one caption; *word* in asterisks = accent.
+4. Pick display mode, style, typography → «Создать субтитры» (Create captions).
+5. Every caption is a regular text layer: move it, scale it, edit it.
+   Global size, height and colors live as effects on the CAPTION_CTRL layer.
+(The panel interface is in Russian; this guide gives the English meaning of each button.)
+
+FONTS
+Defaults are Montserrat ExtraBold and Playfair Display Black (free at fonts.google.com).
+Install them or type the PostScript name of your own font (e.g. Arial-BoldMT).
+
+TROUBLESHOOTING
+• "Recognition failed" / python not found → reinstall Python with "Add python.exe to PATH" ticked,
+  or type py into the Python field of the panel.
+• Asked to enable a permission → see Step 2.
+• Panel missing from the Window menu → make sure the file is inside "ScriptUI Panels" and restart AE.
+• Any other error → send a screenshot (the error box shows a line number).

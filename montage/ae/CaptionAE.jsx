@@ -587,7 +587,9 @@
 
     function defaultPython() {
         if ($.os.indexOf("Windows") >= 0) return "python";
-        var c = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", "/usr/bin/python3"];
+        // same list as install/install_mac.command, which installs faster-whisper into each of these
+        var c = ["/opt/homebrew/bin/python3", "/usr/local/bin/python3",
+            "/Library/Frameworks/Python.framework/Versions/Current/bin/python3", "/usr/bin/python3"];
         for (var i = 0; i < c.length; i++) if (File(c[i]).exists) return c[i];
         return "python3";
     }

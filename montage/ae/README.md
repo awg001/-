@@ -8,12 +8,15 @@
 Это скрипт-панель (ScriptUI): ставится копированием файла, встаёт в интерфейс AE как обычная панель плагина.
 
 ## Установка (один раз)
-1. Положить `CaptionAE.jsx` и `transcribe.py` в одну папку:
-   - как панель: `…/Adobe After Effects <версия>/Scripts/ScriptUI Panels/` → AE: Window > CaptionAE.jsx;
-   - или любую папку → AE: File > Scripts > Run Script File…
-2. AE: Preferences > Scripting & Expressions > включить **Allow Scripts to Write Files and Access Network**.
-3. Для распознавания: Python 3.9+ и `pip install faster-whisper`. Модель (~0.5 ГБ для `small`)
-   скачается при первом запуске. Без Python можно пользоваться импортом SRT.
+Пошаговые инструкции для тестировщиков — в `install/`: Windows и Mac, на русском и английском
+(`Установка — Windows (RU).txt`, `Установка — Mac (RU).txt`, `Install — Windows (EN).txt`, `Install — Mac (EN).txt`).
+Распознавание ставится одним кликом: `install_windows.bat` / `install_mac.command`.
+Работает на Windows и macOS, включая Apple Silicon (M1–M4).
+
+Коротко: `CaptionAE.jsx` + `transcribe.py` в `Scripts/ScriptUI Panels` → в AE включить
+**Allow Scripts to Write Files and Access Network** → для распознавания Python 3.9+ и `faster-whisper`.
+
+Архив для отправки: `python3 montage/ae/build_zip.py CaptionAE.zip`.
 
 ## Работа
 1. Выделить слой с голосом → «Распознать речь слоя» (`small` быстрее, `medium` точнее для русского).
