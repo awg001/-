@@ -404,7 +404,10 @@
             var lay = plan ? typoLayout(ws, plan.big) : null;
             var ta = t0 + 0.15; // accent moment: the accent word, else just after the line appears
             for (j = 0; j < p.length; j++) if (p[j].accent) { ta = offset + p[j].start; break; }
-            var layer = comp.layers.addText(lay ? lay.text : wrapLine(ws, opt.maxChars));
+            // opt.lineWords: first line holds exactly that many words, the rest go to line 2 (plain captions, 2 lines)
+            var plainText = opt.lineWords && ws.length > opt.lineWords ?
+                ws.slice(0, opt.lineWords).join(" ") + "\r" + ws.slice(opt.lineWords).join(" ") : wrapLine(ws, opt.maxChars);
+            var layer = comp.layers.addText(lay ? lay.text : plainText);
             layer.name = ws.join(" ").substring(0, 40); layer.comment = TAG;
             layer.startTime = 0; layer.inPoint = t0; layer.outPoint = Math.min(t1, comp.duration);
 
@@ -413,6 +416,9 @@
             td.font = opt.font; td.fontSize = opt.size; td.fillColor = [1, 1, 1];
             td.applyStroke = opt.stroke; td.strokeColor = [0, 0, 0]; td.strokeWidth = Math.round(opt.size * 0.09);
             td.strokeOverFill = false; td.justification = ParagraphJustification.CENTER_JUSTIFY;
+            if (opt.leadingPct) { // line spacing as % of the font size instead of AE's auto (120 %)
+                try { td.autoLeading = false; td.leading = Math.round(opt.size * opt.leadingPct / 100); } catch (eL) {}
+            }
             if (lay) {
                 if (typeof td.characterRange === "function") { // per-word font and size: AE 2024+
                     for (j = 0; j < ws.length; j++) {
@@ -1031,8 +1037,12 @@
     var bPTrans = p0.add("button", undefined, "Распознать речь слоя");
     var bPImp = p0.add("button", undefined, "Импорт SRT / JSON");
     var pInfo = gp.add("statictext", undefined, "Текст: ещё не загружен", { truncate: "end" }); pInfo.preferredSize = [380, 18];
-    var p1 = gp.add("group"); p1.add("statictext", undefined, "Слов на экране");
+    var p1 = gp.add("group"); p1.add("statictext", undefined, "Слов в строке");
     var ddPN = p1.add("dropdownlist", undefined, ["1", "2", "3", "4", "5", "6"]); ddPN.selection = Math.min(+pref("pN", "1"), 5);
+    p1.add("statictext", undefined, "Строк");
+    var ddPL = p1.add("dropdownlist", undefined, ["1", "2"]); ddPL.selection = Math.min(+pref("pLines", "0"), 1);
+    p1.add("statictext", undefined, "Межстрочный, %");
+    var ePLead = p1.add("edittext", undefined, pref("pLead", "110")); ePLead.characters = 4;
     var cPBreak = gp.add("checkbox", undefined, "Рвать на точках и паузах (без галочки — строго по N слов)"); cPBreak.value = pref("pBreak", "1") === "1";
     var p2 = gp.add("group"); p2.add("statictext", undefined, "Длительность");
     var ddPDur = p2.add("dropdownlist", undefined, ["по речи — до следующих слов", "фиксированная"]); ddPDur.selection = +pref("pDurMode", "0");
@@ -1060,14 +1070,14 @@
     bPBuild.onClick = function () {
         var comp = activeComp(); if (!comp) return;
         if (!words.length) { alert("Сначала распознайте речь или импортируйте субтитры."); return; }
-        var n = ddPN.selection.index + 1, fixed = ddPDur.selection.index === 1;
-        var keep = { pN: ddPN.selection.index, pBreak: cPBreak.value ? 1 : 0, pDurMode: ddPDur.selection.index, pDur: ePDur.text, pHold: ePHold.text,
+        var per = ddPN.selection.index + 1, lines = ddPL.selection.index + 1, n = per * lines, fixed = ddPDur.selection.index === 1;
+        var keep = { pN: ddPN.selection.index, pLines: ddPL.selection.index, pLead: ePLead.text, pBreak: cPBreak.value ? 1 : 0, pDurMode: ddPDur.selection.index, pDur: ePDur.text, pHold: ePHold.text,
             pFont: ePFont.text, pSize: ePSize.text, pY: ePY.text, pCol: ePCol.text, pUp: cPUp.value ? 1 : 0, pSh: cPSh.value ? 1 : 0 };
         for (var k in keep) setPref(k, keep[k]);
         var ph = groupPhrases(words, n, 999, cPBreak.value ? 0.4 : 1e9, !cPBreak.value);
         var col = hex(ePCol.text.replace("#", ""));
         var opt = { en: {}, smart: false, style: "none", exit: "none", mblur: false, font: ePFont.text, size: +ePSize.text || 72,
-            posY: (+ePY.text || 75) / 100, maxChars: 28, hold: Math.max(0, +ePHold.text || 0), fixedDur: fixed ? Math.max(0.2, +ePDur.text || 1.5) : 0,
+            posY: (+ePY.text || 75) / 100, maxChars: 999, lineWords: lines === 2 ? per : 0, leadingPct: Math.max(50, +ePLead.text || 110), hold: Math.max(0, +ePHold.text || 0), fixedDur: fixed ? Math.max(0.2, +ePDur.text || 1.5) : 0,
             hl: col, accent: col, karaoke: false, upper: cPUp.value, stroke: false, shadow: cPSh.value, hotHit: false, typo: "plain",
             glow: "none", sweep: "none", display: "whole", accentScale: 100, heroUpper: false, heroFly: false };
         app.beginUndoGroup("Caption AE: простые субтитры");
@@ -1075,7 +1085,7 @@
             removeSubs(comp);
             var made = buildSubs(comp, ph, opt, offset);
             comp.layer(CTRL).property("ADBE Effect Parade").property("Text").property(1).setValue(col);
-            status.text = "Готово: " + made + " субтитров по " + n + (cPBreak.value ? " (с разрывами на паузах)" : " слов строго") +
+            status.text = "Готово: " + made + " субтитров, " + per + " сл. × " + lines + " стр." + (cPBreak.value ? " (с разрывами на паузах)" : " строго") +
                 (fixed ? ", по " + opt.fixedDur + " с" : ", по речи") + ".";
         } catch (e) { alert("Ошибка: " + e + " (строка " + e.line + ")"); }
         app.endUndoGroup();

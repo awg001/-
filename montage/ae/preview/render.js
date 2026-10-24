@@ -31,10 +31,10 @@ function scenePlain() {
     const words = CK.parseJSONWords(fs.readFileSync(path.join(ROOT, "montage/projects/zelimkhan/words.json"), "utf8")).filter(w => w.start < 10);
     const comp = new CompItem(W, H, 10.4, FPS);
     comp.layers.addSolid([0, 0, 0], "BG", W, H);
-    const n = +(process.env.PLAIN_N || 2), fixed = +(process.env.PLAIN_DUR || 0);
-    const ph = CK.groupPhrases(words, n, 999, 0.4, false);
+    const per = +(process.env.PLAIN_N || 2), lines = +(process.env.PLAIN_LINES || 1), fixed = +(process.env.PLAIN_DUR || 0);
+    const ph = CK.groupPhrases(words, per * lines, 999, 0.4, false);
     CK.buildSubs(comp, ph, { en: {}, smart: false, style: "none", exit: "none", mblur: false, font: "Montserrat-ExtraBold", size: 72, posY: 0.75,
-        maxChars: 28, hold: 0.3, fixedDur: fixed, hl: [1, 1, 1], accent: [1, 1, 1], karaoke: false, upper: false, stroke: false, shadow: true,
+        maxChars: 999, lineWords: lines === 2 ? per : 0, leadingPct: +(process.env.PLAIN_LEAD || 110), hold: 0.3, fixedDur: fixed, hl: [1, 1, 1], accent: [1, 1, 1], karaoke: false, upper: false, stroke: false, shadow: true,
         hotHit: false, typo: "plain", glow: "none", sweep: "none", display: "whole", accentScale: 100, heroUpper: false, heroFly: false }, 0);
     return { comp, phA: CK.phrasesToText(ph), phB: "" };
 }
@@ -168,7 +168,7 @@ function layout(layer) {
     let y = 0, minX = 1e9, maxX = -1e9, minY = 1e9, maxY = -1e9;
     lines.forEach((ln, li) => {
         const maxS = Math.max(...ln.map(c => c.s), td.fontSize);
-        if (li) y += 1.2 * maxS;
+        if (li) y += td.autoLeading === false && td.leading ? td.leading : 1.2 * maxS; // fixed leading if the script set one
         let x = 0;
         for (const c of ln) { meas.font = `${c.s}px ${family(c.f)}`; c.adv = meas.measureText(c.c).width; c.x = x; x += c.adv; }
         for (const c of ln) { c.x -= x / 2; c.y = y; }
