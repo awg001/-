@@ -12,14 +12,35 @@ const CK = require("../CaptionAE.jsx");
 
 const ROOT = path.resolve(__dirname, "../../..");
 const FONTS = { "Montserrat-ExtraBold": ["work/fonts/montserrat-800-normal.ttf", "MontEB"],
-    "PlayfairDisplay-Black": ["work/fonts/playfair-display-900-normal.ttf", "PlayBlack"] };
+    "PlayfairDisplay-Black": ["work/fonts/playfair-display-900-normal.ttf", "PlayBlack"],
+    "PlayfairDisplay-Regular": ["work/fonts/playfair-display-400-normal.ttf", "PlayReg"] };
 for (const k in FONTS) GlobalFonts.registerFromPath(path.join(ROOT, FONTS[k][0]), FONTS[k][1]);
 const family = ps => (FONTS[ps] || FONTS["Montserrat-ExtraBold"])[1];
 
 const W = 1080, H = 1920, FPS = 30;
 
-// ---------- scene: what the panel would do ----------
-function scene() {
+// ---------- scenes: what the panel would do ----------
+// SCENE=story (default): the "Сторителлинг — сдержанно" preset over the whole clip; SCENE=mix: everything switched on
+function scene() { return (process.env.SCENE || "story") === "mix" ? sceneMix() : sceneStory(); }
+
+const markAccents = (txt, list) => list.reduce((t, w) => t.replace(new RegExp("(\\| |\\s)" + w.replace(".", "\\.") + "(?=\\s|$)"), "$1*" + w + "*"), txt);
+
+function sceneStory() {
+    const words = CK.parseJSONWords(fs.readFileSync(path.join(ROOT, "montage/projects/zelimkhan/words.json"), "utf8")).filter(w => w.start < 21.2);
+    const comp = new CompItem(W, H, 21.6, FPS);
+    comp.layers.addSolid([0, 0, 0], "BG", W, H);
+    // the preset's values, exactly as applyPreset(1) sets the panel
+    const opt = { en: {}, smart: true, style: "soft", exit: "soft", mblur: true, font: "PlayfairDisplay-Regular", size: 74, posY: 0.72,
+        maxChars: 18, hold: 0.4, hl: [0.97, 0.84, 0.25], accent: [1, 1, 1], karaoke: false, upper: false, stroke: false, shadow: true,
+        hotHit: false, typo: "accent", font2: "PlayfairDisplay-Black", bigPct: 200, smallPct: 100, glow: "none", sweep: "none",
+        heroUpper: true, heroFly: true, display: "flow" };
+    // accents by meaning, ~one per 3–4 s, as Claude would return the panel text
+    const txt = markAccents(CK.phrasesToText(CK.groupPhrases(words, 3, 18, 0.4)), ["одним", "Зелимхан", "тюрьму", "несправедливым.", "бежит", "начало."]);
+    CK.buildSubs(comp, CK.textToPhrases(txt, words), opt, 0);
+    return { comp, phA: txt, phB: "" };
+}
+
+function sceneMix() {
     const words = CK.parseJSONWords(fs.readFileSync(path.join(ROOT, "montage/projects/zelimkhan/words.json"), "utf8"));
     const comp = new CompItem(W, H, 21.6, FPS);
     const bg = comp.layers.addSolid([0, 0, 0], "BG", W, H); // stands in for the footage
@@ -270,15 +291,27 @@ async function main() {
     }
     const bg = background(), frame = createCanvas(W, H), ctx = frame.getContext("2d");
     const n = Math.round(comp.duration * FPS);
-    for (let f = f0; f < Math.min(f1, n); f++) {
-        const t = f / FPS;
-        ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(bg, 0, 0);
+    // motion blur like AE with the plugin's settings: shutter 180°, phase -90° -> open from t-¼ to t+¼ frame; 4 subframes
+    const SUB = comp.motionBlur ? 4 : 1, acc = new Uint32Array(W * H * 4);
+    const renderAt = t => {
+        ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.drawImage(bg, 0, 0);
         for (let i = comp.layerList.length - 1; i >= 0; i--) { // bottom to top
             const L = comp.layerList[i];
             if (!L.enabled || t < L.inPoint || t >= L.outPoint) continue;
             if (L.kind === "text") drawText(ctx, L, t);
             else if (L.adjustmentLayer) applyAdjust(ctx, L, t, frame);
         }
+    };
+    for (let f = f0; f < Math.min(f1, n); f++) {
+        acc.fill(0);
+        for (let k = 0; k < SUB; k++) {
+            renderAt((f + (SUB > 1 ? -0.25 + 0.5 * (k + 0.5) / SUB : 0)) / FPS);
+            const d = ctx.getImageData(0, 0, W, H).data;
+            for (let i = 0; i < d.length; i++) acc[i] += d[i];
+        }
+        const img = ctx.createImageData(W, H);
+        for (let i = 0; i < acc.length; i++) img.data[i] = acc[i] / SUB;
+        ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.putImageData(img, 0, 0);
         fs.writeFileSync(path.join(out, String(f).padStart(4, "0") + ".png"), frame.toBuffer("image/png"));
     }
 }

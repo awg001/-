@@ -145,10 +145,12 @@
         rise:  { name: "Подъём строки",             per: false, dur: 0.30, ease: 2, scale: 100, opacity: 0, pos: [0, 40], blur: 8, stagger: 0.05 },
         punch: { name: "Удар (акцент)",             per: false, dur: 0.22, ease: 2, scale: 260, opacity: 0, pos: [0, 0],  blur: 12, stagger: 0 },
         flick: { name: "Мерцание (flicker)",        per: true,  dur: 0.35, ease: 4, scale: 100, opacity: 0, pos: [0, 0],  blur: 0 },
-        glitch:{ name: "Глитч (акцент)",            per: false, dur: 0.30, ease: 5, scale: 100, opacity: 0, pos: [90, 0], blur: 6, stagger: 0.03 }
+        glitch:{ name: "Глитч (акцент)",            per: false, dur: 0.30, ease: 5, scale: 100, opacity: 0, pos: [90, 0], blur: 6, stagger: 0.03 },
+        // storytelling passport: each word 0.45 s, blur 14 -> 0, rises 40 px, fades in
+        soft:  { name: "Кино: из размытия вверх",   per: true,  dur: 0.45, ease: 3, scale: 100, opacity: 0, pos: [0, 40], blur: 14 }
     };
-    var STYLE_KEYS = ["mix", "pop", "slide", "blur", "cut", "rise", "flick", "punch", "glitch"];
-    var MIX = ["pop", "slide", "blur", "cut", "rise", "flick"];
+    var STYLE_KEYS = ["mix", "pop", "slide", "blur", "cut", "rise", "flick", "punch", "glitch", "soft"];
+    var MIX = ["pop", "slide", "blur", "cut", "rise", "flick", "soft"];
     var HOT = ["punch", "glitch"];
 
     // Exits run over the last D seconds of a phrase. by: 1 = letters, 3 = words.
@@ -157,10 +159,11 @@
         shatter: { name: "Распад на буквы",  by: 1, D: 0.40 },
         up:      { name: "Вылет вверх",      by: 3, D: 0.30, ease: 0, props: { "ADBE Text Position 3D": [0, -90, 0], "ADBE Text Opacity": 0, "ADBE Text Blur": [12, 12] } },
         blurout: { name: "Уход в размытие",  by: 3, D: 0.30, ease: 0, props: { "ADBE Text Scale 3D": [118, 118, 100], "ADBE Text Opacity": 0, "ADBE Text Blur": [30, 30] } },
-        flick:   { name: "Мерцание",         by: 3, D: 0.30, ease: 1, props: { "ADBE Text Opacity": 0 } }
+        flick:   { name: "Мерцание",         by: 3, D: 0.30, ease: 1, props: { "ADBE Text Opacity": 0 } },
+        soft:    { name: "Мягкий: вверх в размытие", by: 3, D: 0.35, ease: 0, props: { "ADBE Text Position 3D": [0, -30, 0], "ADBE Text Opacity": 0, "ADBE Text Blur": [12, 12] } }
     };
-    var EXIT_KEYS = ["mix", "fade", "shatter", "up", "blurout", "flick"];
-    var EXIT_MIX = ["up", "blurout", "flick", "fade"];
+    var EXIT_KEYS = ["mix", "fade", "shatter", "up", "blurout", "flick", "soft"];
+    var EXIT_MIX = ["up", "blurout", "flick", "fade", "soft"];
 
     function pool(list, en) {
         var r = [], i;
@@ -271,6 +274,12 @@
             "var v=(on&&t>=T[i]&&(i==T.length-1||t<T[i+1]))?100:0;[v,v,v]";
     }
 
+    // key word flies in from a bigger scale with blur, out-expo over 0.5 s, on its own reveal time
+    function heroExpr(T, big) {
+        return "var T=" + arr(T) + ",H=" + big + ",D=0.5,i=Math.min(textIndex-1,T.length-1);\n" +
+            "var p=Math.max(0,Math.min(1,(time-inPoint-T[i])/D)),e=p>=1?1:1-Math.pow(2,-10*p),v=(i==H)?100*(1-e):0;[v,v,v]";
+    }
+
     function accentExpr(A) {
         return "var A=" + arr(A) + ",i=Math.min(textIndex-1,A.length-1),v=A[i]?100:0;[v,v,v]";
     }
@@ -329,7 +338,7 @@
     // Typography composition: which phrases get it and which word is the hero.
     // mode: plain | all | mix (accent lines + every third line); hero = accent word, else the longest word of 4+ letters
     function typoPlan(p, mode, i, hot) {
-        if (mode === "plain" || (mode === "mix" && !hot && i % 3 !== 1)) return null;
+        if (mode === "plain" || (mode === "mix" && !hot && i % 3 !== 1) || (mode === "accent" && !hot)) return null;
         if (p.length === 1 && !hot) return null; // one word on screen: only an accent earns the big type
         var big = -1, bl = 3, j;
         for (j = 0; j < p.length; j++) if (p[j].accent) { big = j; break; }
@@ -374,7 +383,9 @@
                 T.push(opt.display === "whole" ? j * 0.035 : st.per ? S[j] : j * st.stagger);
                 A.push(p[j].accent);
             }
-            var hotI = phraseInfo(ph, i).hot, plan = typoPlan(p, opt.typo, i, hotI), lay = plan ? typoLayout(ws, plan.big) : null;
+            var hotI = phraseInfo(ph, i).hot, plan = typoPlan(p, opt.typo, i, hotI);
+            if (plan && opt.heroUpper) ws[plan.big] = ws[plan.big].toUpperCase();
+            var lay = plan ? typoLayout(ws, plan.big) : null;
             var ta = t0 + 0.15; // accent moment: the accent word, else just after the line appears
             for (j = 0; j < p.length; j++) if (p[j].accent) { ta = offset + p[j].start; break; }
             var layer = comp.layers.addText(lay ? lay.text : wrapLine(ws, opt.maxChars));
@@ -399,7 +410,7 @@
             // fit: measured before any animator exists, so allow for the karaoke (104%) and accent (112%) growth added later;
             // wider than 90% of the frame -> the layer's own scale shrinks it
             var grow = 1.04, rc = layer.sourceRectAtTime(t0, false);
-            for (j = 0; j < p.length; j++) if (p[j].accent) grow = 1.04 * 1.12;
+            if (!plan) for (j = 0; j < p.length; j++) if (p[j].accent) grow = 1.04 * 1.12;
             var fit = rc.width * grow > comp.width * 0.9 ? comp.width * 0.9 / (rc.width * grow) * 100 : 100;
 
             var more = layer.property("ADBE Text Properties").property("ADBE Text More Options");
@@ -407,7 +418,9 @@
             more.property("ADBE Text Anchor Point Align").setValue([0, -35]);
 
             addAnimator(layer, "Base color", { "ADBE Text Fill Color": C + '.effect("Text")(1)' }, null);
-            addAnimator(layer, "Accent", { "ADBE Text Fill Color": C + '.effect("Accent")(1)', "ADBE Text Scale 3D": [112, 112, 100] }, accentExpr(A));
+            var accP = { "ADBE Text Fill Color": C + '.effect("Accent")(1)' };
+            if (!plan) accP["ADBE Text Scale 3D"] = [112, 112, 100]; // a hero word is already big
+            addAnimator(layer, "Accent", accP, accentExpr(A));
             addAnimator(layer, "Highlight", { "ADBE Text Fill Color": C + '.effect("Highlight")(1)', "ADBE Text Scale 3D": [104, 104, 100] }, highlightExpr(S));
             var rv = {};
             if (st.scale !== 100) rv["ADBE Text Scale 3D"] = [st.scale, st.scale, 100];
@@ -415,6 +428,7 @@
             if (st.blur) rv["ADBE Text Blur"] = [st.blur, st.blur];
             rv["ADBE Text Opacity"] = st.opacity;
             addAnimator(layer, "Reveal " + styles[i], rv, revealExpr(T, st));
+            if (plan && opt.heroFly) addAnimator(layer, "Hero fly", { "ADBE Text Scale 3D": [160, 160, 100], "ADBE Text Blur": [10, 10] }, heroExpr(T, plan.big));
 
             // exit squeezed into the pause after the last word, but never shorter than 0.15 s
             var ex = EXITS[exits[i]], lastEnd = offset + p[p.length - 1].end;
@@ -582,7 +596,7 @@
     var API = { trim: trim, parseJSONWords: parseJSONWords, parseSRT: parseSRT, groupPhrases: groupPhrases,
         phrasesToText: phrasesToText, textToPhrases: textToPhrases, pickStyles: pickStyles, revealExpr: revealExpr,
         highlightExpr: highlightExpr, accentExpr: accentExpr, wrapLine: wrapLine, STYLES: STYLES,
-        pickExits: pickExits, shakeExpr: shakeExpr, punchExpr: punchExpr, typoPlan: typoPlan, typoLayout: typoLayout,
+        pickExits: pickExits, shakeExpr: shakeExpr, punchExpr: punchExpr, typoPlan: typoPlan, typoLayout: typoLayout, heroExpr: heroExpr,
         buildSubs: buildSubs, shakeFrame: shakeFrame, addShake: addShake, addPunch: addPunch, addGlow: addGlow, addSweep: addSweep, autoAccents: autoAccents, phraseInfo: phraseInfo, shatterMoveExpr: shatterMoveExpr, shatterFadeExpr: shatterFadeExpr, wordExitExpr: wordExitExpr, EXITS: EXITS };
     if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
 
@@ -658,21 +672,24 @@
     var bRegroup = g2r.add("button", undefined, "Разбить заново");
 
     var g3 = tSub.add("panel", undefined, "3. Стиль"); g3.alignChildren = ["fill", "top"];
+    var rP = g3.add("group"); rP.add("statictext", undefined, "Пресет");
+    var PRESETS = ["Свои настройки", "Сторителлинг — сдержанно", "Динамично (TikTok)"];
+    var ddPreset = rP.add("dropdownlist", undefined, PRESETS); ddPreset.selection = Math.min(+pref("preset", "1"), 2);
     var names = ["Микс (разная анимация, акценты — удар/глитч)"];
     for (var si = 1; si < STYLE_KEYS.length; si++) names.push(STYLES[STYLE_KEYS[si]].name);
     var rS = g3.add("group"); rS.add("statictext", undefined, "Появление");
-    var ddStyle = rS.add("dropdownlist", undefined, names); ddStyle.selection = Math.min(+pref("style", "0"), names.length - 1);
+    var ddStyle = rS.add("dropdownlist", undefined, names); ddStyle.selection = Math.min(+pref("style", String(STYLE_KEYS.length - 1)), names.length - 1);
     var exNames = ["Микс (акценты — распад)"];
     for (si = 1; si < EXIT_KEYS.length; si++) exNames.push(EXITS[EXIT_KEYS[si]].name);
     var rE = g3.add("group"); rE.add("statictext", undefined, "Уход");
-    var ddExit = rE.add("dropdownlist", undefined, exNames); ddExit.selection = Math.min(+pref("exit", "0"), exNames.length - 1);
+    var ddExit = rE.add("dropdownlist", undefined, exNames); ddExit.selection = Math.min(+pref("exit", String(EXIT_KEYS.length - 1)), exNames.length - 1);
 
     var gm = g3.add("panel", undefined, "Что разрешено «Миксу»"); gm.alignChildren = ["left", "top"];
     var MIX_UI = [["pop", "Pop"], ["slide", "Выезд"], ["blur", "Размытие"], ["cut", "Рубленый"], ["rise", "Подъём"],
-        ["flick", "Мерцание"], ["punch", "Удар"], ["glitch", "Глитч"]];
-    var EXIT_UI = [["fade", "Затухание"], ["shatter", "Распад"], ["up", "Вылет"], ["blurout", "Размытие"], ["flick", "Мерцание"]];
-    var onIn = "," + pref("enIn", "pop,slide,blur,cut,rise,flick,punch,glitch") + ",";
-    var onOut = "," + pref("enOut", "fade,shatter,up,blurout,flick") + ",";
+        ["flick", "Мерцание"], ["punch", "Удар"], ["glitch", "Глитч"], ["soft", "Кино"]];
+    var EXIT_UI = [["fade", "Затухание"], ["shatter", "Распад"], ["up", "Вылет"], ["blurout", "Размытие"], ["flick", "Мерцание"], ["soft", "Мягкий"]];
+    var onIn = "," + pref("enIn", "pop,slide,blur,cut,rise,flick,punch,glitch,soft") + ",";
+    var onOut = "," + pref("enOut", "fade,shatter,up,blurout,flick,soft") + ",";
     var cbIn = [], cbOut = [], row, ci;
     gm.add("statictext", undefined, "Появление:");
     for (ci = 0; ci < MIX_UI.length; ci++) {
@@ -699,41 +716,64 @@
     }
     var r3 = g3.add("group");
     r3.add("statictext", undefined, "Шрифт (PostScript)");
-    var eFont = r3.add("edittext", undefined, pref("font", "Montserrat-ExtraBold")); eFont.characters = 18;
+    var eFont = r3.add("edittext", undefined, pref("font", "PlayfairDisplay-Regular")); eFont.characters = 18;
     var r3b = g3.add("group");
     r3b.add("statictext", undefined, "Размер");
-    var eSize = r3b.add("edittext", undefined, pref("size", "90")); eSize.characters = 4;
+    var eSize = r3b.add("edittext", undefined, pref("size", "74")); eSize.characters = 4;
     r3b.add("statictext", undefined, "Высота, % кадра");
     var ePos = r3b.add("edittext", undefined, pref("posY", "72")); ePos.characters = 4;
     var r3c = g3.add("group");
     r3c.add("statictext", undefined, "Подсветка #");
     var eHl = r3c.add("edittext", undefined, pref("hl", "FFD400")); eHl.characters = 7;
     r3c.add("statictext", undefined, "Акцент #");
-    var eAcc = r3c.add("edittext", undefined, pref("acc", "FF3B30")); eAcc.characters = 7;
+    var eAcc = r3c.add("edittext", undefined, pref("acc", "FFFFFF")); eAcc.characters = 7;
     var r3d = g3.add("group");
-    var cKara = r3d.add("checkbox", undefined, "Караоке-подсветка"); cKara.value = pref("kara", "1") === "1";
+    var cKara = r3d.add("checkbox", undefined, "Караоке-подсветка"); cKara.value = pref("kara", "0") === "1";
     var cUpper = r3d.add("checkbox", undefined, "КАПС"); cUpper.value = pref("upper", "0") === "1";
-    var cStroke = r3d.add("checkbox", undefined, "Обводка"); cStroke.value = pref("stroke", "1") === "1";
+    var cStroke = r3d.add("checkbox", undefined, "Обводка"); cStroke.value = pref("stroke", "0") === "1";
     var cShadow = r3d.add("checkbox", undefined, "Тень"); cShadow.value = pref("shadow", "1") === "1";
     var cMblur = g3.add("checkbox", undefined, "Motion blur (плавнее движение, рендер дольше)"); cMblur.value = pref("mblur", "1") === "1";
-    var cHotHit = g3.add("checkbox", undefined, "Акцентные фразы: толчок + тряска на акцентном слове"); cHotHit.value = pref("hotHit", "1") === "1";
+    var cHotHit = g3.add("checkbox", undefined, "Акцентные фразы: толчок + тряска на акцентном слове"); cHotHit.value = pref("hotHit", "0") === "1";
 
     var g5 = tSub.add("panel", undefined, "4. Типографика и свет"); g5.alignChildren = ["left", "top"];
-    var TYPO = [["plain", "Одинаковая"], ["all", "Разная во всех фразах"], ["mix", "Микс: разная на акцентах и каждой 3-й фразе"]];
+    var TYPO = [["plain", "Одинаковая"], ["all", "Разная во всех фразах"], ["mix", "Микс: разная на акцентах и каждой 3-й фразе"],
+        ["accent", "Только акцентное слово"]];
     var tyNames = []; for (si = 0; si < TYPO.length; si++) tyNames.push(TYPO[si][1]);
     var t1r = g5.add("group"); t1r.add("statictext", undefined, "Типографика");
-    var ddTypo = t1r.add("dropdownlist", undefined, tyNames); ddTypo.selection = Math.min(+pref("typo", "2"), 2);
+    var ddTypo = t1r.add("dropdownlist", undefined, tyNames); ddTypo.selection = Math.min(+pref("typo", "3"), TYPO.length - 1);
     var t2r = g5.add("group"); t2r.add("statictext", undefined, "Шрифт крупного слова");
     var eFont2 = t2r.add("edittext", undefined, pref("font2", "PlayfairDisplay-Black")); eFont2.characters = 18;
     var t3r = g5.add("group");
-    t3r.add("statictext", undefined, "Крупное, %"); var eBig = t3r.add("edittext", undefined, pref("bigPct", "160")); eBig.characters = 4;
-    t3r.add("statictext", undefined, "Мелкие слова, %"); var eSmall = t3r.add("edittext", undefined, pref("smallPct", "65")); eSmall.characters = 4;
+    t3r.add("statictext", undefined, "Крупное, %"); var eBig = t3r.add("edittext", undefined, pref("bigPct", "200")); eBig.characters = 4;
+    t3r.add("statictext", undefined, "Мелкие слова, %"); var eSmall = t3r.add("edittext", undefined, pref("smallPct", "100")); eSmall.characters = 4;
     var LIGHT = [["none", "нет"], ["hot", "на акцентных"], ["all", "на всех"]];
     var lNames = []; for (si = 0; si < LIGHT.length; si++) lNames.push(LIGHT[si][1]);
     var t4r = g5.add("group");
-    t4r.add("statictext", undefined, "Свечение"); var ddGlow = t4r.add("dropdownlist", undefined, lNames); ddGlow.selection = +pref("glow", "1");
-    t4r.add("statictext", undefined, "Блик"); var ddSweep = t4r.add("dropdownlist", undefined, lNames); ddSweep.selection = +pref("sweep", "1");
+    t4r.add("statictext", undefined, "Свечение"); var ddGlow = t4r.add("dropdownlist", undefined, lNames); ddGlow.selection = +pref("glow", "0");
+    t4r.add("statictext", undefined, "Блик"); var ddSweep = t4r.add("dropdownlist", undefined, lNames); ddSweep.selection = +pref("sweep", "0");
+    var t5r = g5.add("group");
+    var cHeroUp = t5r.add("checkbox", undefined, "Крупное слово КАПСОМ"); cHeroUp.value = pref("heroUp", "1") === "1";
+    var cHeroFly = t5r.add("checkbox", undefined, "Влетает с 160%"); cHeroFly.value = pref("heroFly", "1") === "1";
     g5.add("statictext", undefined, "Крупное слово = акцент *…*, иначе самое длинное. Мелкие = слова до 3 букв.\nРазные шрифт и размер в одной фразе — AE 2024 и новее.", { multiline: true });
+
+    // presets fill the controls; anything can still be changed by hand afterwards
+    function applyPreset(k) {
+        var P = [null, {
+            style: "soft", exit: "soft", font: "PlayfairDisplay-Regular", size: 74, kara: false, upper: false, stroke: false, shadow: true,
+            hotHit: false, acc: "FFFFFF", typo: "accent", font2: "PlayfairDisplay-Black", big: 200, small: 100, glow: 0, sweep: 0, heroUp: true, heroFly: true
+        }, {
+            style: "pop", exit: "fade", font: "Montserrat-ExtraBold", size: 80, kara: true, upper: true, stroke: true, shadow: true,
+            hotHit: true, acc: "FFFFFF", typo: "plain", font2: "PlayfairDisplay-Black", big: 160, small: 100, glow: 0, sweep: 0, heroUp: true, heroFly: false
+        }][k];
+        if (!P) return;
+        ddStyle.selection = STYLE_KEYS.indexOf(P.style); ddExit.selection = EXIT_KEYS.indexOf(P.exit);
+        eFont.text = P.font; eSize.text = P.size; cKara.value = P.kara; cUpper.value = P.upper; cStroke.value = P.stroke;
+        cShadow.value = P.shadow; cHotHit.value = P.hotHit; eAcc.text = P.acc; eHl.text = "F7D640";
+        for (var i = 0; i < TYPO.length; i++) if (TYPO[i][0] === P.typo) ddTypo.selection = i;
+        eFont2.text = P.font2; eBig.text = P.big; eSmall.text = P.small; ddGlow.selection = P.glow; ddSweep.selection = P.sweep;
+        cHeroUp.value = P.heroUp; cHeroFly.value = P.heroFly; cMblur.value = true;
+    }
+    ddPreset.onChange = function () { if (ddPreset.selection) applyPreset(ddPreset.selection.index); };
 
     var r4 = tSub.add("group"); r4.alignment = ["fill", "top"];
     var bBuild = r4.add("button", undefined, "Создать субтитры");
@@ -897,6 +937,7 @@
             smart: cSmart.value, display: DISPLAY[ddDisplay.selection.index][0], hotHit: cHotHit.value,
             typo: TYPO[ddTypo.selection.index][0], font2: eFont2.text, bigPct: +eBig.text || 160, smallPct: +eSmall.text || 65,
             glow: LIGHT[ddGlow.selection.index][0], sweep: LIGHT[ddSweep.selection.index][0],
+            heroUpper: cHeroUp.value, heroFly: cHeroFly.value,
             style: STYLE_KEYS[ddStyle.selection.index], exit: EXIT_KEYS[ddExit.selection.index], mblur: cMblur.value, font: eFont.text, size: +eSize.text || 90,
             posY: (+ePos.text || 72) / 100, maxChars: +eChars.text || 18, hold: 0.4,
             hl: hex(eHl.text.replace("#", "")), accent: hex(eAcc.text.replace("#", "")),
@@ -905,7 +946,8 @@
         var keep = { maxWords: eWords.text, maxChars: eChars.text, style: ddStyle.selection.index, exit: ddExit.selection.index,
             mblur: cMblur.value ? 1 : 0, enIn: checkedKeys(cbIn, MIX_UI).list, enOut: checkedKeys(cbOut, EXIT_UI).list,
             smart: cSmart.value ? 1 : 0, display: ddDisplay.selection.index, hotHit: cHotHit.value ? 1 : 0, typo: ddTypo.selection.index, font2: eFont2.text,
-            bigPct: eBig.text, smallPct: eSmall.text, glow: ddGlow.selection.index, sweep: ddSweep.selection.index, voice: cVoice.value ? 1 : 0, thr: eThr.text, font: eFont.text, size: eSize.text,
+            bigPct: eBig.text, smallPct: eSmall.text, glow: ddGlow.selection.index, sweep: ddSweep.selection.index,
+            heroUp: cHeroUp.value ? 1 : 0, heroFly: cHeroFly.value ? 1 : 0, preset: ddPreset.selection.index, voice: cVoice.value ? 1 : 0, thr: eThr.text, font: eFont.text, size: eSize.text,
             posY: ePos.text, hl: eHl.text, acc: eAcc.text, kara: cKara.value ? 1 : 0, upper: cUpper.value ? 1 : 0,
             stroke: cStroke.value ? 1 : 0, shadow: cShadow.value ? 1 : 0 };
         for (var k in keep) setPref(k, keep[k]);
