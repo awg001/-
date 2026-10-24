@@ -1,9 +1,9 @@
-"""Speech → word timings for AutoSubs.jsx: python3 transcribe.py media.mp4 out.json [ru] [small]
+"""Speech → word timings for CaptionAE.jsx: python3 transcribe.py media.mp4 out.json [ru] [small]
 
 Runs locally on the editor's machine. Needs `pip install faster-whisper` (the model downloads once, ~0.5–3 GB).
 Falls back to openai-whisper if that is what is installed. Output is the same format as tools/align.py:
 [{"w": "слово", "start": 1.23, "end": 1.51, "db": 4.2}, ...] — times in seconds from the start of the media file,
-db = how much louder than the speaker's median the word was said (AutoSubs turns the loudest into accents)."""
+db = how much louder than the speaker's median the word was said (Caption AE turns the loudest into accents)."""
 import json, sys
 
 

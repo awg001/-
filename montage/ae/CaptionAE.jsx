@@ -1,10 +1,12 @@
-﻿// MontageKit — editing toolkit panel for After Effects (ExtendScript, AE 2020+): animated subtitles, screen shake, text hits.
-// Run: File > Scripts > Run Script File…, or copy into "Scripts/ScriptUI Panels" to get a dockable panel (Window > MontageKit.jsx).
+﻿// Caption AE — editing toolkit panel for After Effects (ExtendScript, AE 2020+): animated subtitles, screen shake, text hits.
+// Run: File > Scripts > Run Script File…, or copy into "Scripts/ScriptUI Panels" to get a dockable panel (Window > CaptionAE.jsx).
 // Text source: local Whisper (transcribe.py next to this file), an SRT (e.g. Premiere's Speech to Text export),
 // or a words JSON [{w,start,end}] (montage/tools/align.py). Every phrase becomes a text layer animated by expression
-// selectors, so editing Source Text later keeps the animation; global look lives on the SUBS_CTRL null.
+// selectors, so editing Source Text later keeps the animation; global look lives on the CAPTION_CTRL null.
+// Layers stay plain text layers in the comp (no precomp); transform expressions add on top of each layer's own values,
+// so any line can still be dragged, scaled or rotated by hand.
 (function (thisObj) {
-    var CTRL = "SUBS_CTRL", TAG = "autosubs";
+    var CTRL = "CAPTION_CTRL", TAG = "captionae";
 
     // ---------- pure helpers (ES3: ExtendScript has no map/forEach/trim/JSON) ----------
     function trim(s) { return String(s).replace(/^\s+|\s+$/g, ""); }
@@ -428,9 +430,10 @@
             var tr = layer.property("ADBE Transform Group");
             // center on the fully revealed line, measured before the exit starts scattering it
             tr.property("ADBE Anchor Point").expression = "var r=sourceRectAtTime(Math.max(inPoint,outPoint-" + D + "-thisComp.frameDuration),false);[r.left+r.width/2,r.top+r.height/2]";
-            tr.property("ADBE Position").expression = "[thisComp.width/2,thisComp.height*" + opt.posY + "+" + C + '.effect("Y offset")(1)]';
-            tr.property("ADBE Scale").expression = "var s=" + C + '.effect("Size %")(1);[s,s]';
-            if (exits[i] === "fade") tr.property("ADBE Opacity").expression = "var f=3*thisComp.frameDuration;linear(time,outPoint-f,outPoint,100,0)";
+            tr.property("ADBE Position").setValue([comp.width / 2, comp.height * opt.posY]);
+            tr.property("ADBE Position").expression = "value+[0," + C + '.effect("Y offset")(1)]';
+            tr.property("ADBE Scale").expression = "var s=" + C + '.effect("Size %")(1)/100;[value[0]*s,value[1]*s]';
+            if (exits[i] === "fade") tr.property("ADBE Opacity").expression = "var f=3*thisComp.frameDuration;value*linear(time,outPoint-f,outPoint,1,0)";
             function on(scope) { return scope === "all" || (scope === "hot" && hotI); }
             if (on(opt.sweep)) addSweep(layer, ta, 0.6);
             if (on(opt.glow)) addGlow(layer, opt.size);
@@ -574,7 +577,7 @@
     if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
 
     // ---------- UI ----------
-    var SEC = "MontageKit", words = [], offset = 0;
+    var SEC = "CaptionAE", words = [], offset = 0;
     var scriptDir = File($.fileName).parent;
 
     function pref(k, d) { return app.settings.haveSetting(SEC, k) ? app.settings.getSetting(SEC, k) : d; }
@@ -605,7 +608,7 @@
 
     function hex(c) { return [parseInt(c.substr(0, 2), 16) / 255, parseInt(c.substr(2, 2), 16) / 255, parseInt(c.substr(4, 2), 16) / 255]; }
 
-    var win = thisObj instanceof Panel ? thisObj : new Window("palette", "MontageKit — субтитры, тряска, акценты", undefined, { resizeable: true });
+    var win = thisObj instanceof Panel ? thisObj : new Window("palette", "Caption AE — субтитры, тряска, акценты", undefined, { resizeable: true });
     win.orientation = "column"; win.alignChildren = ["fill", "top"]; win.spacing = 6; win.margins = 10;
 
     var tabs = win.add("tabbedpanel"); tabs.alignChildren = ["fill", "top"];
@@ -764,7 +767,7 @@
             shFreq: eFreq.text, shPx: ePx.text, shRot: eRot.text, shZoom: eZoom.text, shDur: eDur.text, shSharp: eSharp.text,
             shBlur: cShBlur.value ? 1 : 0, shKeep: cKeepSubs.value ? 1 : 0 };
         for (var k in keep) setPref(k, keep[k]);
-        app.beginUndoGroup("MontageKit: тряска");
+        app.beginUndoGroup("Caption AE: тряска");
         try {
             if (ddTarget.selection.index === 0) { shakeFrame(comp, o); status.text = "Тряска на весь кадр: слой SHAKE."; }
             else {
@@ -804,7 +807,7 @@
         var keep = { hKind: ddPunch.selection.index, hPow: ddHPow.selection.index, hDur: eHDur.text, hWhen: ddWhen.selection.index,
             hShake: cHShake.value ? 1 : 0, hBlur: cHBlur.value ? 1 : 0 };
         for (var k in keep) setPref(k, keep[k]);
-        app.beginUndoGroup("MontageKit: акцент");
+        app.beginUndoGroup("Caption AE: акцент");
         try {
             for (i = 0; i < sel.length; i++) {
                 var t0 = ddWhen.selection.index ? sel[i].inPoint : comp.time;
@@ -821,7 +824,7 @@
         var comp = activeComp(); if (!comp) return;
         var sel = comp.selectedLayers, i;
         if (!sel.length) { alert("Выделите слои."); return; }
-        app.beginUndoGroup("MontageKit: " + name);
+        app.beginUndoGroup("Caption AE: " + name);
         try { for (i = 0; i < sel.length; i++) fn(comp, sel[i]); status.text = name + ": " + sel.length + " слой(ёв)."; }
         catch (e) { alert("Ошибка: " + e + " (строка " + e.line + ")"); }
         app.endUndoGroup();
@@ -849,7 +852,7 @@
         if (!canRunCommands()) return;
         var py = File(scriptDir.fsName + "/transcribe.py");
         if (!py.exists) { alert("Рядом со скриптом нет transcribe.py:\n" + py.fsName); return; }
-        var out = File(Folder.temp.fsName + "/autosubs_words.json"); if (out.exists) out.remove();
+        var out = File(Folder.temp.fsName + "/captionae_words.json"); if (out.exists) out.remove();
         setPref("python", ePy.text); setPref("model", ddModel.selection.text);
         status.text = "Распознаю… (AE подвиснет на время распознавания)"; win.update && win.update();
         var q = function (s) { return '"' + s + '"'; };
@@ -894,7 +897,7 @@
             posY: ePos.text, hl: eHl.text, acc: eAcc.text, kara: cKara.value ? 1 : 0, upper: cUpper.value ? 1 : 0,
             stroke: cStroke.value ? 1 : 0, shadow: cShadow.value ? 1 : 0 };
         for (var k in keep) setPref(k, keep[k]);
-        app.beginUndoGroup("MontageKit: создать");
+        app.beginUndoGroup("Caption AE: создать");
         try {
             removeSubs(comp);
             var n = buildSubs(comp, textToPhrases(editor.text, words), opt, offset);
@@ -905,7 +908,7 @@
 
     bRemove.onClick = function () {
         var comp = activeComp(); if (!comp) return;
-        app.beginUndoGroup("MontageKit: удалить"); removeSubs(comp); app.endUndoGroup();
+        app.beginUndoGroup("Caption AE: удалить"); removeSubs(comp); app.endUndoGroup();
         status.text = "Субтитры удалены.";
     };
 
