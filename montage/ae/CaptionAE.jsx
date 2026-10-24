@@ -149,9 +149,11 @@
         // storytelling passport: each word 0.45 s, blur 14 -> 0, rises 40 px, fades in
         soft:  { name: "Кино: из размытия вверх",   per: true,  dur: 0.45, ease: 3, scale: 100, opacity: 0, pos: [0, 40], blur: 14 },
         // Devin Jatho captions: the whole phrase pops 80 -> ~105 -> 100 % in 6 frames, phrases change on a hard cut
-        jpop:  { name: "Поп фразой (Jatho)",        per: false, dur: 0.2,  ease: 1, scale: 80,  opacity: 0, pos: [0, 0],  blur: 0, stagger: 0 }
+        jpop:  { name: "Поп фразой (Jatho)",        per: false, dur: 0.2,  ease: 1, scale: 80,  opacity: 0, pos: [0, 0],  blur: 0, stagger: 0 },
+        // plain captions: the phrase is simply there from its first word to the next phrase, nothing moves
+        none:  { name: "Без анимации",              per: false, dur: 0,    ease: 0, scale: 100, opacity: 100, pos: [0, 0], blur: 0, stagger: 0 }
     };
-    var STYLE_KEYS = ["mix", "pop", "slide", "blur", "cut", "rise", "flick", "punch", "glitch", "soft", "jpop"];
+    var STYLE_KEYS = ["mix", "pop", "slide", "blur", "cut", "rise", "flick", "punch", "glitch", "soft", "jpop", "none"];
     var MIX = ["pop", "slide", "blur", "cut", "rise", "flick", "soft"];
     var HOT = ["punch", "glitch"];
 
@@ -162,9 +164,10 @@
         up:      { name: "Вылет вверх",      by: 3, D: 0.30, ease: 0, props: { "ADBE Text Position 3D": [0, -90, 0], "ADBE Text Opacity": 0, "ADBE Text Blur": [12, 12] } },
         blurout: { name: "Уход в размытие",  by: 3, D: 0.30, ease: 0, props: { "ADBE Text Scale 3D": [118, 118, 100], "ADBE Text Opacity": 0, "ADBE Text Blur": [30, 30] } },
         flick:   { name: "Мерцание",         by: 3, D: 0.30, ease: 1, props: { "ADBE Text Opacity": 0 } },
-        soft:    { name: "Мягкий: вверх в размытие", by: 3, D: 0.35, ease: 0, props: { "ADBE Text Position 3D": [0, -30, 0], "ADBE Text Opacity": 0, "ADBE Text Blur": [12, 12] } }
+        soft:    { name: "Мягкий: вверх в размытие", by: 3, D: 0.35, ease: 0, props: { "ADBE Text Position 3D": [0, -30, 0], "ADBE Text Opacity": 0, "ADBE Text Blur": [12, 12] } },
+        none:    { name: "Без ухода (обрыв)" }
     };
-    var EXIT_KEYS = ["mix", "fade", "shatter", "up", "blurout", "flick", "soft"];
+    var EXIT_KEYS = ["mix", "fade", "shatter", "up", "blurout", "flick", "soft", "none"];
     var EXIT_MIX = ["up", "blurout", "flick", "fade", "soft"];
 
     function pool(list, en) {
@@ -438,7 +441,7 @@
             if (st.pos[0] || st.pos[1]) rv["ADBE Text Position 3D"] = [st.pos[0], st.pos[1], 0];
             if (st.blur) rv["ADBE Text Blur"] = [st.blur, st.blur];
             rv["ADBE Text Opacity"] = st.opacity;
-            addAnimator(layer, "Reveal " + styles[i], rv, revealExpr(T, st));
+            if (styles[i] !== "none") addAnimator(layer, "Reveal " + styles[i], rv, revealExpr(T, st));
             if (plan && opt.heroFly) addAnimator(layer, "Hero fly", { "ADBE Text Scale 3D": [160, 160, 100], "ADBE Text Blur": [10, 10] }, heroExpr(T, plan.big));
 
             // exit squeezed into the pause after the last word, but never shorter than 0.15 s
@@ -761,7 +764,7 @@
 
     var g3 = tSub.add("panel", undefined, "3. Стиль"); g3.alignChildren = ["fill", "top"];
     var rP = g3.add("group"); rP.add("statictext", undefined, "Пресет");
-    var PRESETS = ["Свои настройки", "Сторителлинг — сдержанно", "Динамично (TikTok)", "Jatho — эксперт"];
+    var PRESETS = ["Свои настройки", "Сторителлинг — сдержанно", "Динамично (TikTok)", "Jatho — эксперт", "Простые субтитры"];
     var ddPreset = rP.add("dropdownlist", undefined, PRESETS); ddPreset.selection = Math.min(+pref("preset", "1"), PRESETS.length - 1);
     var names = ["Микс (разная анимация, акценты — удар/глитч)"];
     for (var si = 1; si < STYLE_KEYS.length; si++) names.push(STYLES[STYLE_KEYS[si]].name);
@@ -864,6 +867,11 @@
             style: "jpop", exit: "fade", font: "Montserrat-ExtraBold", size: 92, kara: false, upper: true, stroke: false, shadow: true,
             hotHit: false, acc: "E51926", typo: "plain", font2: "PlayfairDisplay-Black", big: 160, small: 100, glow: 0, sweep: 0, heroUp: true, heroFly: false,
             display: "whole", posY: 75, words: 3, zoom: true, accS: 100
+        }, {
+            // plain captions: no reveal, no exit, no karaoke, no accents growing — just the text and the soft shadow
+            style: "none", exit: "none", font: "Montserrat-ExtraBold", size: 72, kara: false, upper: false, stroke: false, shadow: true,
+            hotHit: false, acc: "FFFFFF", typo: "plain", font2: "PlayfairDisplay-Black", big: 160, small: 100, glow: 0, sweep: 0, heroUp: false, heroFly: false,
+            display: "whole", posY: 75, words: 4, zoom: false, accS: 100
         }][k];
         if (!P) return;
         ddStyle.selection = STYLE_KEYS.indexOf(P.style); ddExit.selection = EXIT_KEYS.indexOf(P.exit);
