@@ -145,25 +145,14 @@ def wanted():
     im = pil_from(paper(w, h, (214, 192, 150), 7, .35)).convert('RGBA')
     d = ImageDraw.Draw(im)
     d.rectangle([24, 24, w - 24, h - 24], outline=(60, 40, 25, 255), width=5)
-    d.text((w / 2, 120), 'РАЗЫСКИВАЕТСЯ', font=font('playfair-display-900-normal', 84), fill=(40, 25, 15), anchor='mm')
+    d.text((w / 2, 120), 'РАЗЫСКИВАЕТСЯ', font=font('playfair-display-900-normal', 70), fill=(40, 25, 15), anchor='mm')
     d.line([90, 190, w - 90, 190], fill=(60, 40, 25), width=3)
-    # engraved silhouette: shoulders, head, papakha
-    sil = Image.new('L', (w, h), 0); s = ImageDraw.Draw(sil)
-    cx = w / 2
-    s.ellipse([cx - 82, 330, cx + 82, 545], fill=255)                       # head
-    s.polygon([(cx - 82, 470), (cx + 82, 470), (cx + 60, 600), (cx, 625), (cx - 60, 600)], fill=255)  # beard
-    s.rounded_rectangle([cx - 128, 235, cx + 128, 375], 45, fill=255)      # papakha
-    for bx in range(int(cx - 120), int(cx + 121), 26):                      # fur
-        s.ellipse([bx - 17, 222, bx + 17, 256], fill=255)
-    s.rectangle([cx - 45, 560, cx + 45, 640], fill=255)                     # neck
-    s.ellipse([cx - 300, 600, cx + 300, 1000], fill=255)                    # shoulders
-    sil = sil.crop((0, 0, w, 760))
-    hatch = Image.new('RGBA', (w, 760), (0, 0, 0, 0)); hd = ImageDraw.Draw(hatch)
-    for x in range(-760, w, 9): hd.line([x, 760, x + 760, 0], fill=(45, 30, 20, 255), width=3)
-    frame = Image.new('RGBA', (w, 760), (0, 0, 0, 0)); frame.paste(hatch, (0, 0), sil)
-    frame = frame.crop((110, 220, w - 110, 760))
-    im.alpha_composite(frame, (110, 220))
-    d.rectangle([110, 220, w - 110, 760], outline=(60, 40, 25, 255), width=3)
+    # no photo: an engraved question mark stands in for the portrait
+    q = Image.new('L', (w, h), 0)
+    ImageDraw.Draw(q).text((w / 2, 500), '?', font=font('playfair-display-900-normal', 520), fill=255, anchor='mm')
+    hatch = Image.new('RGBA', (w, h), (0, 0, 0, 0)); hd = ImageDraw.Draw(hatch)
+    for x in range(-h, w, 9): hd.line([x, h, x + h, 0], fill=(45, 30, 20, 255), width=4)
+    im.paste(hatch, (0, 0), q)
     d.text((w / 2, 840), 'АБРЕК ЗЕЛИМХАН', font=font('playfair-display-900-normal', 70), fill=(40, 25, 15), anchor='mm')
     d.text((w / 2, 930), 'ХАРАЧОЕВСКИЙ', font=font('montserrat-800-normal', 40), fill=(70, 45, 30), anchor='mm')
     d.line([90, 990, w - 90, 990], fill=(60, 40, 25), width=3)
@@ -394,7 +383,7 @@ def shake(t, t0, amp=18, d=.35):
     k = prog(t, t0, d)
     if k <= 0 or k >= 1: return 0, 0
     f = (1 - k) ** 2 * amp
-    return f * math.sin(t * 90), f * math.cos(t * 77)
+    return f * math.sin(t * 38), f * math.cos(t * 31)
 
 def sc_escape(t):
     lt = t - (CUTS[2] - TR); e = in_out_cubic(prog(lt, 0, 4.0))
@@ -424,7 +413,7 @@ def sc_begin(t):
 
 def sc_rails(t):
     lt = t - (CUTS[4] - TR)
-    sx, sy = shake(t, 25.6, 14)
+    sx, sy = shake(t, 25.6, 9)
     camera = (1.04 + .04 * math.sin(lt * .8), sx, sy, .8 * math.sin(lt * 1.3))
     c = canvas(camera)
     # dusk sky + ground
