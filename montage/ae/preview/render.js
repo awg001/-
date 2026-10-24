@@ -21,7 +21,23 @@ const W = 1080, H = 1920, FPS = 30;
 
 // ---------- scenes: what the panel would do ----------
 // SCENE=story (default): the "Сторителлинг — сдержанно" preset over the whole clip; SCENE=mix: everything switched on
-function scene() { const k = process.env.SCENE || "story"; return k === "mix" ? sceneMix() : k === "jatho" ? sceneJatho() : sceneStory(); }
+function scene() {
+    const k = process.env.SCENE || "story";
+    return k === "mix" ? sceneMix() : k === "jatho" ? sceneJatho() : k === "plain" ? scenePlain() : sceneStory();
+}
+
+// "Простые субтитры" tab: N words per caption (PLAIN_N, default 2), no animation, fixed PLAIN_DUR seconds or by speech
+function scenePlain() {
+    const words = CK.parseJSONWords(fs.readFileSync(path.join(ROOT, "montage/projects/zelimkhan/words.json"), "utf8")).filter(w => w.start < 10);
+    const comp = new CompItem(W, H, 10.4, FPS);
+    comp.layers.addSolid([0, 0, 0], "BG", W, H);
+    const n = +(process.env.PLAIN_N || 2), fixed = +(process.env.PLAIN_DUR || 0);
+    const ph = CK.groupPhrases(words, n, 999, 0.4, false);
+    CK.buildSubs(comp, ph, { en: {}, smart: false, style: "none", exit: "none", mblur: false, font: "Montserrat-ExtraBold", size: 72, posY: 0.75,
+        maxChars: 28, hold: 0.3, fixedDur: fixed, hl: [1, 1, 1], accent: [1, 1, 1], karaoke: false, upper: false, stroke: false, shadow: true,
+        hotHit: false, typo: "plain", glow: "none", sweep: "none", display: "whole", accentScale: 100, heroUpper: false, heroFly: false }, 0);
+    return { comp, phA: CK.phrasesToText(ph), phB: "" };
+}
 
 // "Jatho — эксперт" preset: two-tone hook title, phrase pops in white caps, accent words red, punch-in on accents
 function sceneJatho() {

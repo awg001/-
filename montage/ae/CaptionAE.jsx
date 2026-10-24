@@ -55,18 +55,19 @@
         return out;
     }
 
-    // Split words into on-screen phrases: by word/char limits, pauses and sentence ends
-    function groupPhrases(words, maxWords, maxChars, gap) {
+    // Split words into on-screen phrases: by word/char limits, pauses and sentence ends.
+    // strict: exactly maxWords per phrase, ignoring punctuation and pauses
+    function groupPhrases(words, maxWords, maxChars, gap, strict) {
         var ph = [], cur = [], len = 0, i, w;
         for (i = 0; i < words.length; i++) {
             w = words[i];
             if (cur.length) {
                 var prev = cur[cur.length - 1];
-                var brk = cur.length >= maxWords || len + 1 + w.w.length > maxChars || w.start - prev.end > gap ||
-                    /[.!?…]$/.test(prev.w) || (/[,;:—]$/.test(prev.w) && cur.length >= 2);
+                var brk = strict ? cur.length >= maxWords : cur.length >= maxWords || len + 1 + w.w.length > maxChars ||
+                    w.start - prev.end > gap || /[.!?…]$/.test(prev.w) || (/[,;:—]$/.test(prev.w) && cur.length >= 2);
                 if (brk) {
                     // a dangling preposition ("в", "из", "и") goes to the next line with its word
-                    var tail = cur.length >= 2 && prev.w.length <= 2 && !/[.,!?…;:—]$/.test(prev.w) ? cur.pop() : null;
+                    var tail = !strict && cur.length >= 2 && prev.w.length <= 2 && !/[.,!?…;:—]$/.test(prev.w) ? cur.pop() : null;
                     ph.push(cur); cur = []; len = 0;
                     if (tail) { cur.push(tail); len = tail.w.length; }
                 }
@@ -388,7 +389,9 @@
             var next = i + 1 < ph.length ? offset + ph[i + 1][0].start : comp.duration;
             var t1 = Math.min(next, last + opt.hold);
             if (next - last < 0.6) t1 = next; // close gap: no flicker between lines
+            if (opt.fixedDur) t1 = Math.min(next, t0 + opt.fixedDur); // fixed length, cut short only by the next words
             if (t1 - t0 < 0.2) t1 = t0 + 0.2;
+            if (next > t0 && t1 > next) t1 = next; // never two captions on screen at once
             for (j = 0; j < p.length; j++) {
                 ws.push(opt.upper ? p[j].w.toUpperCase() : p[j].w);
                 S.push(offset + p[j].start - t0); // when the word is spoken (karaoke)
@@ -730,6 +733,7 @@
 
     var tabs = win.add("tabbedpanel"); tabs.alignChildren = ["fill", "top"];
     var tSub = tabs.add("tab", undefined, "Субтитры"); tSub.alignChildren = ["fill", "top"];
+    var tPlain = tabs.add("tab", undefined, "Простые субтитры"); tPlain.alignChildren = ["fill", "top"];
     var tShake = tabs.add("tab", undefined, "Тряска"); tShake.alignChildren = ["fill", "top"];
     var tHit = tabs.add("tab", undefined, "Акцент-эффекты"); tHit.alignChildren = ["fill", "top"];
     var g1 = tSub.add("panel", undefined, "1. Текст"); g1.alignChildren = ["fill", "top"];
@@ -1020,6 +1024,62 @@
     }
     bGlow.onClick = function () { eachSelected("свечение", function (c, L) { addGlow(L, +eSize.text || 90); }); };
     bSweep.onClick = function () { eachSelected("блик", function (c, L) { addSweep(L, c.time, 0.6 * Math.max(0.2, +eHDur.text || 1)); }); };
+
+    // ---------- plain captions: a separate tool, no animation; words per caption and duration are the controls ----------
+    var gp = tPlain.add("panel", undefined, "Простые субтитры — без анимации"); gp.alignChildren = ["left", "top"];
+    var p0 = gp.add("group");
+    var bPTrans = p0.add("button", undefined, "Распознать речь слоя");
+    var bPImp = p0.add("button", undefined, "Импорт SRT / JSON");
+    var pInfo = gp.add("statictext", undefined, "Текст: ещё не загружен", { truncate: "end" }); pInfo.preferredSize = [380, 18];
+    var p1 = gp.add("group"); p1.add("statictext", undefined, "Слов на экране");
+    var ddPN = p1.add("dropdownlist", undefined, ["1", "2", "3", "4", "5", "6"]); ddPN.selection = Math.min(+pref("pN", "1"), 5);
+    var cPBreak = gp.add("checkbox", undefined, "Рвать на точках и паузах (без галочки — строго по N слов)"); cPBreak.value = pref("pBreak", "1") === "1";
+    var p2 = gp.add("group"); p2.add("statictext", undefined, "Длительность");
+    var ddPDur = p2.add("dropdownlist", undefined, ["по речи — до следующих слов", "фиксированная"]); ddPDur.selection = +pref("pDurMode", "0");
+    var p3 = gp.add("group");
+    p3.add("statictext", undefined, "Фикс., с"); var ePDur = p3.add("edittext", undefined, pref("pDur", "1.5")); ePDur.characters = 4;
+    p3.add("statictext", undefined, "По речи: держать после слова, с"); var ePHold = p3.add("edittext", undefined, pref("pHold", "0.3")); ePHold.characters = 4;
+    var p4 = gp.add("group"); p4.add("statictext", undefined, "Шрифт (PostScript)");
+    var ePFont = p4.add("edittext", undefined, pref("pFont", "Montserrat-ExtraBold")); ePFont.characters = 18;
+    var p5 = gp.add("group");
+    p5.add("statictext", undefined, "Размер"); var ePSize = p5.add("edittext", undefined, pref("pSize", "72")); ePSize.characters = 4;
+    p5.add("statictext", undefined, "Высота, %"); var ePY = p5.add("edittext", undefined, pref("pY", "75")); ePY.characters = 4;
+    p5.add("statictext", undefined, "Цвет #"); var ePCol = p5.add("edittext", undefined, pref("pCol", "FFFFFF")); ePCol.characters = 7;
+    var p6 = gp.add("group");
+    var cPUp = p6.add("checkbox", undefined, "КАПС"); cPUp.value = pref("pUp", "0") === "1";
+    var cPSh = p6.add("checkbox", undefined, "Мягкая тень"); cPSh.value = pref("pSh", "1") === "1";
+    var p7 = gp.add("group");
+    var bPBuild = p7.add("button", undefined, "Добавить субтитры");
+    var bPDel = p7.add("button", undefined, "Удалить субтитры");
+    gp.add("statictext", undefined, "Фиксированная длительность обрывается раньше, если следующие слова уже звучат.\nКаждый субтитр — обычный текстовый слой, правится руками.", { multiline: true });
+
+    function plainInfo() { pInfo.text = words.length ? "Текст: " + words.length + " слов, " + fmtTime(words[words.length - 1].end) : "Текст: ещё не загружен"; }
+    bPTrans.onClick = function () { bTrans.onClick(); plainInfo(); };
+    bPImp.onClick = function () { bImport.onClick(); plainInfo(); };
+    bPDel.onClick = function () { bRemove.onClick(); };
+    bPBuild.onClick = function () {
+        var comp = activeComp(); if (!comp) return;
+        if (!words.length) { alert("Сначала распознайте речь или импортируйте субтитры."); return; }
+        var n = ddPN.selection.index + 1, fixed = ddPDur.selection.index === 1;
+        var keep = { pN: ddPN.selection.index, pBreak: cPBreak.value ? 1 : 0, pDurMode: ddPDur.selection.index, pDur: ePDur.text, pHold: ePHold.text,
+            pFont: ePFont.text, pSize: ePSize.text, pY: ePY.text, pCol: ePCol.text, pUp: cPUp.value ? 1 : 0, pSh: cPSh.value ? 1 : 0 };
+        for (var k in keep) setPref(k, keep[k]);
+        var ph = groupPhrases(words, n, 999, cPBreak.value ? 0.4 : 1e9, !cPBreak.value);
+        var col = hex(ePCol.text.replace("#", ""));
+        var opt = { en: {}, smart: false, style: "none", exit: "none", mblur: false, font: ePFont.text, size: +ePSize.text || 72,
+            posY: (+ePY.text || 75) / 100, maxChars: 28, hold: Math.max(0, +ePHold.text || 0), fixedDur: fixed ? Math.max(0.2, +ePDur.text || 1.5) : 0,
+            hl: col, accent: col, karaoke: false, upper: cPUp.value, stroke: false, shadow: cPSh.value, hotHit: false, typo: "plain",
+            glow: "none", sweep: "none", display: "whole", accentScale: 100, heroUpper: false, heroFly: false };
+        app.beginUndoGroup("Caption AE: простые субтитры");
+        try {
+            removeSubs(comp);
+            var made = buildSubs(comp, ph, opt, offset);
+            comp.layer(CTRL).property("ADBE Effect Parade").property("Text").property(1).setValue(col);
+            status.text = "Готово: " + made + " субтитров по " + n + (cPBreak.value ? " (с разрывами на паузах)" : " слов строго") +
+                (fixed ? ", по " + opt.fixedDur + " с" : ", по речи") + ".";
+        } catch (e) { alert("Ошибка: " + e + " (строка " + e.line + ")"); }
+        app.endUndoGroup();
+    };
 
     var status = win.add("statictext", undefined, "Выберите слой с голосом и нажмите «Распознать», или импортируйте SRT.", { truncate: "end" });
 
