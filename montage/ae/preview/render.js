@@ -29,7 +29,7 @@ function sceneJatho() {
     const comp = new CompItem(W, H, 15.6, FPS);
     const foot = comp.layers.addSolid([0, 0, 0], "BG", W, H); foot.footage = true; // the talking-head clip
     const opt = { en: {}, smart: true, style: "jpop", exit: "fade", mblur: true, font: "Montserrat-ExtraBold", size: 92, posY: 0.75, accentScale: 100,
-        maxChars: 18, hold: 0.4, hl: [0.97, 0.84, 0.25], accent: [0.9, 0.1, 0.15], karaoke: false, upper: true, stroke: true, shadow: true,
+        maxChars: 18, hold: 0.4, hl: [0.97, 0.84, 0.25], accent: [0.9, 0.1, 0.15], karaoke: false, upper: true, stroke: false, shadow: true,
         hotHit: false, typo: "plain", font2: "PlayfairDisplay-Black", bigPct: 160, smallPct: 100, glow: "none", sweep: "none",
         heroUpper: true, heroFly: false, display: "whole", zoomLayer: foot, zoomAmt: 12, zoomDur: 0 };
     const txt = markAccents(CK.phrasesToText(CK.groupPhrases(words, 3, 18, 0.4)), ["одним", "Зелимхан", "тюрьму", "несправедливым."]);

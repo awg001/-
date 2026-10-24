@@ -323,6 +323,14 @@
         return an;
     }
 
+    // The one shadow for all text: barely offset, wide and soft (6 % / 25 % of the font size), no hard dark edge.
+    function softShadow(layer, size) {
+        var sh = layer.property("ADBE Effect Parade").addProperty("ADBE Drop Shadow");
+        sh.property("ADBE Drop Shadow-0004").setValue(Math.round(size * 0.06));
+        sh.property("ADBE Drop Shadow-0005").setValue(Math.round(size * 0.25));
+        return sh;
+    }
+
     function wrapLine(ws, maxChars) {
         var s = ws.join(" ");
         if (s.length <= maxChars || ws.length < 2) return s;
@@ -464,9 +472,7 @@
             if (on(opt.sweep)) addSweep(layer, ta, 0.6);
             if (on(opt.glow)) addGlow(layer, opt.size);
             if (opt.shadow) {
-                var sh = layer.property("ADBE Effect Parade").addProperty("ADBE Drop Shadow");
-                sh.property("ADBE Drop Shadow-0004").setValue(Math.round(opt.size * 0.06));
-                sh.property("ADBE Drop Shadow-0005").setValue(Math.round(opt.size * 0.25));
+                softShadow(layer, opt.size);
             }
             made++;
         }
@@ -659,8 +665,7 @@
             tr.property("ADBE Scale").setValue([sc, sc]);
             tr.property("ADBE Scale").expression = popInScale(L.inPoint, S.from, S.d, S.c);
             tr.property("ADBE Opacity").expression = "linear(time,inPoint,inPoint+" + (4 * fr) + ",0,100)";
-            var sh = L.property("ADBE Effect Parade").addProperty("ADBE Drop Shadow");
-            sh.property("ADBE Drop Shadow-0004").setValue(4); sh.property("ADBE Drop Shadow-0005").setValue(10);
+            softShadow(L, 120);
             if (k === 1 && o.glow) {
                 var g = L.property("ADBE Effect Parade").addProperty("ADBE Glo2");
                 try { g.property(2).setValue(40); g.property(3).setValue(45); g.property(4).setValue(1); } catch (e) {}
@@ -855,8 +860,8 @@
             style: "pop", exit: "fade", font: "Montserrat-ExtraBold", size: 80, kara: true, upper: true, stroke: true, shadow: true,
             hotHit: true, acc: "FFFFFF", typo: "plain", font2: "PlayfairDisplay-Black", big: 160, small: 100, glow: 0, sweep: 0, heroUp: true, heroFly: false
         }, {
-            // Devin Jatho: white bold caps with a thin outline at Y≈1450, phrase pops, accent word red, punch-in on accents
-            style: "jpop", exit: "fade", font: "Montserrat-ExtraBold", size: 92, kara: false, upper: true, stroke: true, shadow: true,
+            // Devin Jatho: white bold caps at Y≈1450 with a soft shadow (no hard outline), phrase pops, accent word red, punch-in on accents
+            style: "jpop", exit: "fade", font: "Montserrat-ExtraBold", size: 92, kara: false, upper: true, stroke: false, shadow: true,
             hotHit: false, acc: "E51926", typo: "plain", font2: "PlayfairDisplay-Black", big: 160, small: 100, glow: 0, sweep: 0, heroUp: true, heroFly: false,
             display: "whole", posY: 75, words: 3, zoom: true, accS: 100
         }][k];
