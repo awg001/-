@@ -393,6 +393,68 @@
         return made;
     }
 
+    // ---------- shake: a separate editing tool, not tied to subtitles ----------
+    // Transform effect driven by wiggle; strength follows the "amount" slider (keyframed envelope, 0..100)
+    // raised to "curve": rise = slow start that builds up, hit = sharp start that dies away.
+    var SHAKES = { rise: "Нарастание", hit: "Удар (затухает)", hold: "Постоянная" };
+    var SHAKE_KEYS = ["rise", "hit", "hold"];
+    var RHYTHM = [["Плавно", 2], ["Средне", 6], ["Резко", 14], ["Очень резко", 24]];
+
+    function shakeExpr(pre, what) {
+        var env = "var env=Math.pow(Math.max(0,effect(\"" + pre + " amount\")(1))/100,effect(\"" + pre + " curve\")(1));\n";
+        var f = "effect(\"" + pre + " freq\")(1)", oct = "Math.max(1,Math.round(effect(\"" + pre + " sharpness\")(1)))";
+        return env + "wiggle(" + f + ",effect(\"" + pre + " " + what + "\")(1)*env," + oct + ")";
+    }
+
+    function addShake(comp, layer, o) {
+        var fxs = layer.property("ADBE Effect Parade"), n = 1, i;
+        for (i = 1; i <= fxs.numProperties; i++) if (/^Shake\d* amount$/.test(fxs.property(i).name)) n++;
+        var pre = "Shake" + (n > 1 ? n : "");
+        var amt = addEffect(layer, "ADBE Slider Control", pre + " amount", 0);
+        addEffect(layer, "ADBE Slider Control", pre + " freq", o.freq);
+        addEffect(layer, "ADBE Slider Control", pre + " px", o.px);
+        addEffect(layer, "ADBE Slider Control", pre + " rotation", o.rot);
+        addEffect(layer, "ADBE Slider Control", pre + " zoom", o.zoom);
+        addEffect(layer, "ADBE Slider Control", pre + " sharpness", o.sharp);
+        addEffect(layer, "ADBE Slider Control", pre + " curve", 2);
+        var zoomBase = 0;
+        if (o.mirror) { // whole frame: mirrored margins so shaking never shows black edges
+            try {
+                var tile = fxs.addProperty("ADBE Tile"); tile.name = pre + " edges";
+                tile.property("ADBE Tile-0004").setValue(140); tile.property("ADBE Tile-0005").setValue(140);
+                tile.property("ADBE Tile-0006").setValue(1);
+            } catch (e) { // no Motion Tile: hide the edges by zooming in just enough for the shake
+                if (tile) tile.remove();
+                zoomBase = Math.ceil(200 * (o.px + Math.sin(o.rot * Math.PI / 180) * Math.max(comp.width, comp.height)) / Math.min(comp.width, comp.height));
+            }
+        }
+        var tf = fxs.addProperty("ADBE Geometry2"); tf.name = pre + " transform";
+        tf.property("ADBE Geometry2-0002").expression = shakeExpr(pre, "px");
+        tf.property("ADBE Geometry2-0007").expression = shakeExpr(pre, "rotation");
+        tf.property("ADBE Geometry2-0003").expression = shakeExpr(pre, "zoom").replace("wiggle(", "var z=wiggle(") + ";value+Math.abs(z-value)+" + zoomBase + "*env";
+        if (o.blur) { tf.property("ADBE Geometry2-0009").setValue(0); tf.property("ADBE Geometry2-0010").setValue(180); }
+
+        var a = amt.property(1), fr = comp.frameDuration, t0 = o.t0, t1 = o.t0 + o.dur;
+        if (o.kind === "rise") { a.setValueAtTime(t0, 0); a.setValueAtTime(t1, 100); a.setValueAtTime(t1 + fr, 0); }
+        else if (o.kind === "hit") { a.setValueAtTime(t0 - fr, 0); a.setValueAtTime(t0, 100); a.setValueAtTime(t1, 0); }
+        else { a.setValueAtTime(t0 - fr, 0); a.setValueAtTime(t0, 100); a.setValueAtTime(t1, 100); a.setValueAtTime(t1 + fr, 0); }
+        return pre;
+    }
+
+    function shakeFrame(comp, o) {
+        var L = comp.layers.addSolid([0, 0, 0], "SHAKE " + SHAKES[o.kind], comp.width, comp.height, comp.pixelAspect, comp.duration);
+        L.adjustmentLayer = true; L.label = 11;
+        L.inPoint = Math.max(0, o.t0 - comp.frameDuration); L.outPoint = Math.min(comp.duration, o.t0 + o.dur + comp.frameDuration);
+        if (o.keepSubs) { // shake the picture, not the captions: sit right under the subtitle layers
+            for (var i = 2; i <= comp.numLayers; i++) {
+                var x = comp.layer(i);
+                if (x.comment !== TAG) { if (i > 2) L.moveBefore(x); break; }
+            }
+        }
+        o.mirror = true; addShake(comp, L, o);
+        return L;
+    }
+
     function removeSubs(comp) {
         for (var i = comp.numLayers; i >= 1; i--) if (comp.layer(i).comment === TAG) comp.layer(i).remove();
     }
@@ -400,7 +462,7 @@
     var API = { trim: trim, parseJSONWords: parseJSONWords, parseSRT: parseSRT, groupPhrases: groupPhrases,
         phrasesToText: phrasesToText, textToPhrases: textToPhrases, pickStyles: pickStyles, revealExpr: revealExpr,
         highlightExpr: highlightExpr, accentExpr: accentExpr, wrapLine: wrapLine, STYLES: STYLES,
-        pickExits: pickExits, autoAccents: autoAccents, phraseInfo: phraseInfo, shatterMoveExpr: shatterMoveExpr, shatterFadeExpr: shatterFadeExpr, wordExitExpr: wordExitExpr, EXITS: EXITS };
+        pickExits: pickExits, shakeExpr: shakeExpr, autoAccents: autoAccents, phraseInfo: phraseInfo, shatterMoveExpr: shatterMoveExpr, shatterFadeExpr: shatterFadeExpr, wordExitExpr: wordExitExpr, EXITS: EXITS };
     if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
 
     // ---------- UI ----------
@@ -438,7 +500,10 @@
     var win = thisObj instanceof Panel ? thisObj : new Window("palette", "AutoSubs — субтитры", undefined, { resizeable: true });
     win.orientation = "column"; win.alignChildren = ["fill", "top"]; win.spacing = 6; win.margins = 10;
 
-    var g1 = win.add("panel", undefined, "1. Текст"); g1.alignChildren = ["fill", "top"];
+    var tabs = win.add("tabbedpanel"); tabs.alignChildren = ["fill", "top"];
+    var tSub = tabs.add("tab", undefined, "Субтитры"); tSub.alignChildren = ["fill", "top"];
+    var tShake = tabs.add("tab", undefined, "Тряска"); tShake.alignChildren = ["fill", "top"];
+    var g1 = tSub.add("panel", undefined, "1. Текст"); g1.alignChildren = ["fill", "top"];
     var r1 = g1.add("group");
     var bTrans = r1.add("button", undefined, "Распознать речь слоя");
     var bImport = r1.add("button", undefined, "Импорт SRT / JSON");
@@ -456,14 +521,14 @@
     editor.preferredSize = [380, 220];
     g1.add("statictext", undefined, "Строка = фраза на экране. Правьте слова, Enter делит фразу, *слово* = акцент.", { multiline: true });
 
-    var g2 = win.add("panel", undefined, "2. Разбивка"); g2.orientation = "row";
+    var g2 = tSub.add("panel", undefined, "2. Разбивка"); g2.orientation = "row";
     g2.add("statictext", undefined, "Слов до");
     var eWords = g2.add("edittext", undefined, pref("maxWords", "3")); eWords.characters = 3;
     g2.add("statictext", undefined, "Букв до");
     var eChars = g2.add("edittext", undefined, pref("maxChars", "18")); eChars.characters = 3;
     var bRegroup = g2.add("button", undefined, "Разбить заново");
 
-    var g3 = win.add("panel", undefined, "3. Стиль"); g3.alignChildren = ["fill", "top"];
+    var g3 = tSub.add("panel", undefined, "3. Стиль"); g3.alignChildren = ["fill", "top"];
     var names = ["Микс (разная анимация, акценты — удар/глитч)"];
     for (var si = 1; si < STYLE_KEYS.length; si++) names.push(STYLES[STYLE_KEYS[si]].name);
     var rS = g3.add("group"); rS.add("statictext", undefined, "Появление");
@@ -523,9 +588,55 @@
     var cShadow = r3d.add("checkbox", undefined, "Тень"); cShadow.value = pref("shadow", "1") === "1";
     var cMblur = g3.add("checkbox", undefined, "Motion blur (плавнее движение, рендер дольше)"); cMblur.value = pref("mblur", "1") === "1";
 
-    var r4 = win.add("group"); r4.alignment = ["fill", "top"];
+    var r4 = tSub.add("group"); r4.alignment = ["fill", "top"];
     var bBuild = r4.add("button", undefined, "Создать субтитры");
     var bRemove = r4.add("button", undefined, "Удалить субтитры");
+    var gs = tShake.add("panel", undefined, "Тряска кадра или слоёв"); gs.alignChildren = ["left", "top"];
+    var s1 = gs.add("group"); s1.add("statictext", undefined, "Тип");
+    var shNames = []; for (si = 0; si < SHAKE_KEYS.length; si++) shNames.push(SHAKES[SHAKE_KEYS[si]]);
+    var ddShake = s1.add("dropdownlist", undefined, shNames); ddShake.selection = Math.min(+pref("shKind", "0"), 2);
+    s1.add("statictext", undefined, "На");
+    var ddTarget = s1.add("dropdownlist", undefined, ["весь кадр", "выделенные слои"]); ddTarget.selection = +pref("shTarget", "0");
+    var s2 = gs.add("group"); s2.add("statictext", undefined, "Ритм");
+    var rhNames = []; for (si = 0; si < RHYTHM.length; si++) rhNames.push(RHYTHM[si][0]);
+    var ddRh = s2.add("dropdownlist", undefined, rhNames); ddRh.selection = +pref("shRh", "2");
+    s2.add("statictext", undefined, "Частота, Гц");
+    var eFreq = s2.add("edittext", undefined, pref("shFreq", "14")); eFreq.characters = 4;
+    ddRh.onChange = function () { if (ddRh.selection) eFreq.text = RHYTHM[ddRh.selection.index][1]; };
+    var s3 = gs.add("group");
+    s3.add("statictext", undefined, "Сила, px"); var ePx = s3.add("edittext", undefined, pref("shPx", "25")); ePx.characters = 4;
+    s3.add("statictext", undefined, "Поворот, °"); var eRot = s3.add("edittext", undefined, pref("shRot", "1.5")); eRot.characters = 4;
+    s3.add("statictext", undefined, "Зум, %"); var eZoom = s3.add("edittext", undefined, pref("shZoom", "3")); eZoom.characters = 4;
+    var s4 = gs.add("group");
+    s4.add("statictext", undefined, "Длительность, с"); var eDur = s4.add("edittext", undefined, pref("shDur", "1.5")); eDur.characters = 4;
+    s4.add("statictext", undefined, "Резкость 1–4"); var eSharp = s4.add("edittext", undefined, pref("shSharp", "2")); eSharp.characters = 3;
+    var cShBlur = gs.add("checkbox", undefined, "Размытие в движении"); cShBlur.value = pref("shBlur", "1") === "1";
+    var cKeepSubs = gs.add("checkbox", undefined, "Субтитры не трясти (весь кадр)"); cKeepSubs.value = pref("shKeep", "1") === "1";
+    var bShake = gs.add("button", undefined, "Добавить тряску с текущего кадра");
+    gs.add("statictext", undefined, "Потом: эффекты Shake… на слое — сила, частота, поворот, зум, резкость;\nключи Shake amount — форма нарастания/затухания (двигайте их).", { multiline: true });
+
+    bShake.onClick = function () {
+        var comp = activeComp(); if (!comp) return;
+        var o = { kind: SHAKE_KEYS[ddShake.selection.index], t0: comp.time, dur: Math.max(0.1, +eDur.text || 1.5),
+            freq: +eFreq.text || 14, px: +ePx.text || 0, rot: +eRot.text || 0, zoom: +eZoom.text || 0,
+            sharp: Math.max(1, Math.min(4, +eSharp.text || 2)), blur: cShBlur.value, keepSubs: cKeepSubs.value };
+        var keep = { shKind: ddShake.selection.index, shTarget: ddTarget.selection.index, shRh: ddRh.selection ? ddRh.selection.index : 2,
+            shFreq: eFreq.text, shPx: ePx.text, shRot: eRot.text, shZoom: eZoom.text, shDur: eDur.text, shSharp: eSharp.text,
+            shBlur: cShBlur.value ? 1 : 0, shKeep: cKeepSubs.value ? 1 : 0 };
+        for (var k in keep) setPref(k, keep[k]);
+        app.beginUndoGroup("AutoSubs: тряска");
+        try {
+            if (ddTarget.selection.index === 0) { shakeFrame(comp, o); status.text = "Тряска на весь кадр: слой SHAKE."; }
+            else {
+                var sel = comp.selectedLayers, i;
+                if (!sel.length) { alert("Выделите слои."); }
+                for (i = 0; i < sel.length; i++) addShake(comp, sel[i], o);
+                if (sel.length) status.text = "Тряска добавлена на " + sel.length + " слой(ёв).";
+            }
+        } catch (e) { alert("Ошибка: " + e + " (строка " + e.line + ")"); }
+        app.endUndoGroup();
+    };
+
     var status = win.add("statictext", undefined, "Выберите слой с голосом и нажмите «Распознать», или импортируйте SRT.", { truncate: "end" });
 
     function regroup() {
