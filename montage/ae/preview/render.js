@@ -27,6 +27,7 @@ function scene() {
 }
 
 // "Простые субтитры" tab: N words per caption (PLAIN_N, default 2), no animation, fixed PLAIN_DUR seconds or by speech
+// PLAIN_NOPUNCT=1 hides punctuation on screen, PLAIN_NOPUNCT=qe keeps ? and !
 function scenePlain() {
     const words = CK.parseJSONWords(fs.readFileSync(path.join(ROOT, "montage/projects/zelimkhan/words.json"), "utf8")).filter(w => w.start < 10);
     const comp = new CompItem(W, H, 10.4, FPS);
@@ -35,7 +36,8 @@ function scenePlain() {
     const ph = CK.groupPhrases(words, per * lines, 999, 0.4, false);
     CK.buildSubs(comp, ph, { en: {}, smart: false, style: "none", exit: "none", mblur: false, font: "Montserrat-ExtraBold", size: 72, posY: 0.75,
         maxChars: 999, lineWords: lines === 2 ? per : 0, leadingPct: +(process.env.PLAIN_LEAD || 110), hold: 0.3, fixedDur: fixed, hl: [1, 1, 1], accent: [1, 1, 1], karaoke: false, upper: false, stroke: false, shadow: true,
-        hotHit: false, typo: "plain", glow: "none", sweep: "none", display: "whole", accentScale: 100, heroUpper: false, heroFly: false }, 0);
+        hotHit: false, typo: "plain", glow: "none", sweep: "none", display: "whole", accentScale: 100, heroUpper: false, heroFly: false,
+        noPunct: !!process.env.PLAIN_NOPUNCT, keepQE: process.env.PLAIN_NOPUNCT === "qe" }, 0);
     return { comp, phA: CK.phrasesToText(ph), phB: "" };
 }
 

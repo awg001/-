@@ -349,6 +349,22 @@
 
     function bare(w) { return String(w).replace(/[.,!?…;:—«»"()\-]/g, ""); }
 
+    // On-screen words without punctuation: quotes and brackets go everywhere, other marks only at the word's edges,
+    // so "из-за" and "т.е" keep their inner marks. keepQE leaves ? and ! for intonation. A lone "—" becomes "".
+    function stripPunct(w, keepQE) {
+        var edge = keepQE ? "[.,;:…—–\\-]" : "[.,;:…—–\\-!?]";
+        return String(w).replace(/[«»"“”„()\[\]]/g, "").replace(new RegExp("^" + edge + "+|" + edge + "+$", "g"), "");
+    }
+    // a phrase with cleaned words; words that were only punctuation drop out
+    function cleanPhrase(p, keepQE) {
+        var out = [], j, k, c, w;
+        for (j = 0; j < p.length; j++) {
+            w = stripPunct(p[j].w, keepQE); if (w === "") continue;
+            c = {}; for (k in p[j]) c[k] = p[j][k]; c.w = w; out.push(c);
+        }
+        return out;
+    }
+
     // Typography composition: which phrases get it and which word is the hero.
     // mode: plain | all | mix (accent lines + every third line); hero = accent word, else the longest word of 4+ letters
     function typoPlan(p, mode, i, hot) {
@@ -384,7 +400,8 @@
         if (opt.mblur) comp.motionBlur = true;
         var made = 0, i, j;
         for (i = 0; i < ph.length; i++) {
-            var p = ph[i], st = STYLES[styles[i]], ws = [], T = [], S = [], A = [];
+            var p = opt.noPunct ? cleanPhrase(ph[i], opt.keepQE) : ph[i], st = STYLES[styles[i]], ws = [], T = [], S = [], A = [];
+            if (!p.length) continue; // the phrase was punctuation only
             var t0 = offset + p[0].start, last = offset + p[p.length - 1].end;
             var next = i + 1 < ph.length ? offset + ph[i + 1][0].start : comp.duration;
             var t1 = Math.min(next, last + opt.hold);
@@ -803,6 +820,12 @@
     g2r.add("statictext", undefined, "Букв");
     var eChars = g2r.add("edittext", undefined, pref("maxChars", "18")); eChars.characters = 3;
     var bRegroup = g2r.add("button", undefined, "Разбить");
+    var g2p = g2.add("group");
+    var cNoPunct = g2p.add("checkbox", undefined, "Без знаков препинания"); cNoPunct.value = pref("noPunct", "0") === "1";
+    var cKeepQE = g2p.add("checkbox", undefined, "Оставить ? и !"); cKeepQE.value = pref("keepQE", "1") === "1";
+    cNoPunct.helpTip = "Убирает точки, запятые, кавычки, тире на экране. Дефис внутри слова (из-за) остаётся.";
+    function updPunct() { cKeepQE.enabled = cNoPunct.value; }
+    cNoPunct.onClick = updPunct; updPunct();
 
     var g3 = sett.add("panel", undefined, "Стиль"); g3.alignChildren = ["left", "top"]; g3.spacing = 4;
     var names = ["Микс"];
@@ -899,20 +922,22 @@
     function applyPreset(k) {
         var P = [null, {
             style: "soft", exit: "soft", font: "PlayfairDisplay-Regular", size: 74, kara: false, upper: false, stroke: false, shadow: true,
-            hotHit: false, acc: "FFFFFF", typo: "accent", font2: "PlayfairDisplay-Black", big: 200, small: 100, glow: 0, sweep: 0, heroUp: true, heroFly: true
+            hotHit: false, acc: "FFFFFF", typo: "accent", font2: "PlayfairDisplay-Black", big: 200, small: 100, glow: 0, sweep: 0, heroUp: true, heroFly: true,
+            noPunct: false
         }, {
             style: "pop", exit: "fade", font: "Montserrat-ExtraBold", size: 80, kara: true, upper: true, stroke: true, shadow: true,
-            hotHit: true, acc: "FFFFFF", typo: "plain", font2: "PlayfairDisplay-Black", big: 160, small: 100, glow: 0, sweep: 0, heroUp: true, heroFly: false
+            hotHit: true, acc: "FFFFFF", typo: "plain", font2: "PlayfairDisplay-Black", big: 160, small: 100, glow: 0, sweep: 0, heroUp: true, heroFly: false,
+            noPunct: true
         }, {
             // Devin Jatho: white bold caps at Y≈1450 with a soft shadow (no hard outline), phrase pops, accent word red, punch-in on accents
             style: "jpop", exit: "fade", font: "Montserrat-ExtraBold", size: 92, kara: false, upper: true, stroke: false, shadow: true,
             hotHit: false, acc: "E51926", typo: "plain", font2: "PlayfairDisplay-Black", big: 160, small: 100, glow: 0, sweep: 0, heroUp: true, heroFly: false,
-            display: "whole", posY: 75, words: 3, zoom: true, accS: 100
+            display: "whole", posY: 75, words: 3, zoom: true, accS: 100, noPunct: true
         }, {
             // plain captions: no reveal, no exit, no karaoke, no accents growing — just the text and the soft shadow
             style: "none", exit: "none", font: "Montserrat-ExtraBold", size: 72, kara: false, upper: false, stroke: false, shadow: true,
             hotHit: false, acc: "FFFFFF", typo: "plain", font2: "PlayfairDisplay-Black", big: 160, small: 100, glow: 0, sweep: 0, heroUp: false, heroFly: false,
-            display: "whole", posY: 75, words: 4, zoom: false, accS: 100
+            display: "whole", posY: 75, words: 4, zoom: false, accS: 100, noPunct: false
         }][k];
         if (!P) return;
         ddStyle.selection = STYLE_KEYS.indexOf(P.style); ddExit.selection = EXIT_KEYS.indexOf(P.exit);
@@ -921,6 +946,7 @@
         for (var i = 0; i < TYPO.length; i++) if (TYPO[i][0] === P.typo) ddTypo.selection = i;
         eFont2.text = P.font2; eBig.text = P.big; eSmall.text = P.small; ddGlow.selection = P.glow; ddSweep.selection = P.sweep;
         cHeroUp.value = P.heroUp; cHeroFly.value = P.heroFly; cMblur.value = true; cZoom.value = !!P.zoom;
+        cNoPunct.value = !!P.noPunct; cKeepQE.value = true; updPunct();
         ePos.text = P.posY || 72; eWords.text = P.words || 3; eAccS.text = P.accS || 112;
         for (i = 0; i < DISPLAY.length; i++) if (DISPLAY[i][0] === (P.display || "flow")) ddDisplay.selection = i;
         updMix();
@@ -1086,6 +1112,12 @@
     var p6 = gp.add("group");
     var cPUp = p6.add("checkbox", undefined, "КАПС"); cPUp.value = pref("pUp", "0") === "1";
     var cPSh = p6.add("checkbox", undefined, "Мягкая тень"); cPSh.value = pref("pSh", "1") === "1";
+    var p6b = gp.add("group");
+    var cPNoP = p6b.add("checkbox", undefined, "Без знаков препинания"); cPNoP.value = pref("pNoPunct", "0") === "1";
+    var cPQE = p6b.add("checkbox", undefined, "Оставить ? и !"); cPQE.value = pref("pKeepQE", "1") === "1";
+    cPNoP.helpTip = cNoPunct.helpTip;
+    function updPPunct() { cPQE.enabled = cPNoP.value; }
+    cPNoP.onClick = updPPunct; updPPunct();
     var p7 = gp.add("group");
     var bPBuild = p7.add("button", undefined, "Создать субтитры");
     var bPDel = p7.add("button", undefined, "Удалить субтитры");
@@ -1100,14 +1132,16 @@
         if (!words.length) { alert("Сначала распознайте речь или импортируйте субтитры."); return; }
         var per = ddPN.selection.index + 1, lines = ddPL.selection.index + 1, n = per * lines, fixed = ddPDur.selection.index === 1;
         var keep = { pN: ddPN.selection.index, pLines: ddPL.selection.index, pLead: ePLead.text, pBreak: cPBreak.value ? 1 : 0, pDurMode: ddPDur.selection.index, pDur: ePDur.text, pHold: ePHold.text,
-            pFont: ePFont.text, pSize: ePSize.text, pY: ePY.text, pCol: ePCol.text, pUp: cPUp.value ? 1 : 0, pSh: cPSh.value ? 1 : 0 };
+            pFont: ePFont.text, pSize: ePSize.text, pY: ePY.text, pCol: ePCol.text, pUp: cPUp.value ? 1 : 0, pSh: cPSh.value ? 1 : 0,
+            pNoPunct: cPNoP.value ? 1 : 0, pKeepQE: cPQE.value ? 1 : 0 };
         for (var k in keep) setPref(k, keep[k]);
         var ph = groupPhrases(words, n, 999, cPBreak.value ? 0.4 : 1e9, !cPBreak.value);
         var col = hex(ePCol.text.replace("#", ""));
         var opt = { en: {}, smart: false, style: "none", exit: "none", mblur: false, font: ePFont.text, size: +ePSize.text || 72,
             posY: (+ePY.text || 75) / 100, maxChars: 999, lineWords: lines === 2 ? per : 0, leadingPct: Math.max(50, +ePLead.text || 110), hold: Math.max(0, +ePHold.text || 0), fixedDur: fixed ? Math.max(0.2, +ePDur.text || 1.5) : 0,
             hl: col, accent: col, karaoke: false, upper: cPUp.value, stroke: false, shadow: cPSh.value, hotHit: false, typo: "plain",
-            glow: "none", sweep: "none", display: "whole", accentScale: 100, heroUpper: false, heroFly: false };
+            glow: "none", sweep: "none", display: "whole", accentScale: 100, heroUpper: false, heroFly: false,
+            noPunct: cPNoP.value, keepQE: cPQE.value };
         app.beginUndoGroup("Caption AE: простые субтитры");
         try {
             var old = removeSubs(comp);
@@ -1183,6 +1217,7 @@
             posY: (+ePos.text || 72) / 100, maxChars: +eChars.text || 18, hold: 0.4,
             hl: hex(eHl.text.replace("#", "")), accent: hex(eAcc.text.replace("#", "")),
             karaoke: cKara.value, upper: cUpper.value, stroke: cStroke.value, shadow: cShadow.value,
+            noPunct: cNoPunct.value, keepQE: cKeepQE.value,
             accentScale: +eAccS.text || 112, zoomAmt: +eZoom.text || 12, zoomDur: ddZoomKind.selection.index ? 4 * comp.frameDuration : 0
         };
         if (cZoom.value) { // the clip that was transcribed, else the selected footage layer
@@ -1196,7 +1231,7 @@
             bigPct: eBig.text, smallPct: eSmall.text, glow: ddGlow.selection.index, sweep: ddSweep.selection.index,
             heroUp: cHeroUp.value ? 1 : 0, heroFly: cHeroFly.value ? 1 : 0, preset: ddPreset.selection.index, voice: cVoice.value ? 1 : 0, thr: eThr.text, font: eFont.text, size: eSize.text,
             posY: ePos.text, hl: eHl.text, acc: eAcc.text, kara: cKara.value ? 1 : 0, upper: cUpper.value ? 1 : 0,
-            stroke: cStroke.value ? 1 : 0, shadow: cShadow.value ? 1 : 0,
+            stroke: cStroke.value ? 1 : 0, shadow: cShadow.value ? 1 : 0, noPunct: cNoPunct.value ? 1 : 0, keepQE: cKeepQE.value ? 1 : 0,
             zoom: cZoom.value ? 1 : 0, zoomAmt: eZoom.text, accS: eAccS.text, zoomKind: ddZoomKind.selection.index };
         for (var k in keep) setPref(k, keep[k]);
         app.beginUndoGroup("Caption AE: создать");
