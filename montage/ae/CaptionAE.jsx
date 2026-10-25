@@ -532,7 +532,7 @@
         var fxs = layer.property("ADBE Effect Parade"), n = 1, i;
         for (i = 1; i <= fxs.numProperties; i++) if (/^Shake\d* amount$/.test(fxs.property(i).name)) n++;
         var pre = "Shake" + (n > 1 ? n : "");
-        var amt = addEffect(layer, "ADBE Slider Control", pre + " amount", 0);
+        addEffect(layer, "ADBE Slider Control", pre + " amount", 0);
         addEffect(layer, "ADBE Slider Control", pre + " freq", o.freq);
         addEffect(layer, "ADBE Slider Control", pre + " px", o.px);
         addEffect(layer, "ADBE Slider Control", pre + " rotation", o.rot);
@@ -556,7 +556,8 @@
         tf.property("ADBE Geometry2-0003").expression = shakeExpr(pre, "zoom").replace("wiggle(", "var z=wiggle(") + ";value+Math.abs(z-value)+" + zoomBase + "*env";
         if (o.blur) { tf.property("ADBE Geometry2-0009").setValue(0); tf.property("ADBE Geometry2-0010").setValue(180); }
 
-        var a = amt.property(1), fr = comp.frameDuration, t0 = o.t0, t1 = o.t0 + o.dur;
+        // looked up again by name: in AE, adding the effects above invalidated the reference returned at creation
+        var a = fxs.property(pre + " amount").property(1), fr = comp.frameDuration, t0 = o.t0, t1 = o.t0 + o.dur;
         if (o.kind === "rise") { a.setValueAtTime(t0, 0); a.setValueAtTime(t1, 100); a.setValueAtTime(t1 + fr, 0); }
         else if (o.kind === "hit") { a.setValueAtTime(t0 - fr, 0); a.setValueAtTime(t0, 100); a.setValueAtTime(t1, 0); }
         else { a.setValueAtTime(t0 - fr, 0); a.setValueAtTime(t0, 100); a.setValueAtTime(t1, 100); a.setValueAtTime(t1 + fr, 0); }
@@ -1171,10 +1172,10 @@
     var s3 = gs.add("group");
     s3.add("statictext", undefined, "Сила, px"); var ePx = s3.add("edittext", undefined, pref("shPx", "25")); ePx.characters = 4;
     s3.add("statictext", undefined, "Поворот, °"); var eRot = s3.add("edittext", undefined, pref("shRot", "1.5")); eRot.characters = 4;
-    s3.add("statictext", undefined, "Зум, %"); var eZoom = s3.add("edittext", undefined, pref("shZoom", "3")); eZoom.characters = 4;
+    s3.add("statictext", undefined, "Зум, %"); var eShZoom = s3.add("edittext", undefined, pref("shZoom", "3")); eShZoom.characters = 4;
     ddPow.onChange = function () {
         if (!ddPow.selection) return;
-        var w = POWER[ddPow.selection.index]; ePx.text = w[1]; eRot.text = w[2]; eZoom.text = w[3];
+        var w = POWER[ddPow.selection.index]; ePx.text = w[1]; eRot.text = w[2]; eShZoom.text = w[3];
     };
     var s4 = gs.add("group");
     s4.add("statictext", undefined, "Длительность, с"); var eDur = s4.add("edittext", undefined, pref("shDur", "1.5")); eDur.characters = 4;
@@ -1187,20 +1188,21 @@
     bShake.onClick = function () {
         var comp = activeComp(); if (!comp) return;
         var o = { kind: SHAKE_KEYS[ddShake.selection.index], t0: comp.time, dur: Math.max(0.1, +eDur.text || 1.5),
-            freq: +eFreq.text || 14, px: +ePx.text || 0, rot: +eRot.text || 0, zoom: +eZoom.text || 0,
+            freq: +eFreq.text || 14, px: +ePx.text || 0, rot: +eRot.text || 0, zoom: +eShZoom.text || 0,
             sharp: Math.max(1, Math.min(4, +eSharp.text || 2)), blur: cShBlur.value, keepSubs: cKeepSubs.value };
         var keep = { shKind: ddShake.selection.index, shTarget: ddTarget.selection.index, shRh: ddRh.selection ? ddRh.selection.index : 2, shPow: ddPow.selection ? ddPow.selection.index : 1,
-            shFreq: eFreq.text, shPx: ePx.text, shRot: eRot.text, shZoom: eZoom.text, shDur: eDur.text, shSharp: eSharp.text,
+            shFreq: eFreq.text, shPx: ePx.text, shRot: eRot.text, shZoom: eShZoom.text, shDur: eDur.text, shSharp: eSharp.text,
             shBlur: cShBlur.value ? 1 : 0, shKeep: cKeepSubs.value ? 1 : 0 };
         for (var k in keep) setPref(k, keep[k]);
         app.beginUndoGroup("Caption AE: тряска");
         try {
-            if (ddTarget.selection.index === 0) { shakeFrame(comp, o); status.text = "Тряска на весь кадр: слой SHAKE."; }
+            var when = " с " + fmtTime(o.t0) + " на " + o.dur + " с — проиграйте этот участок" + (o.kind === "rise" ? " (на первом кадре она ещё нулевая)." : ".");
+            if (ddTarget.selection.index === 0) { shakeFrame(comp, o); status.text = "Тряска на весь кадр (слой SHAKE)" + when; }
             else {
                 var sel = comp.selectedLayers, i;
                 if (!sel.length) { alert("Выделите слои."); }
                 for (i = 0; i < sel.length; i++) addShake(comp, sel[i], o);
-                if (sel.length) status.text = "Тряска добавлена: " + plural(sel.length, ["слой", "слоя", "слоёв"]) + ".";
+                if (sel.length) status.text = "Тряска: " + plural(sel.length, ["слой", "слоя", "слоёв"]) + when;
             }
         } catch (e) { fail("Не удалось добавить тряску.", e); }
         app.endUndoGroup();

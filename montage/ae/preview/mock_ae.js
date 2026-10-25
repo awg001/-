@@ -8,6 +8,7 @@ class Prop {
         this.children = []; this.val = undefined; this.expression = ""; this.keys = [];
     }
     property(k) {
+        this._check();
         if (typeof k === "number") {
             while (this.children.length < k) this._add("#" + (this.children.length + 1));
             return this.children[k - 1];
@@ -16,11 +17,17 @@ class Prop {
         return this._add(k);
     }
     _add(m) { const c = new Prop(m, this); this.children.push(c); return c; }
-    addProperty(m) { return this._add(m); }
+    // Like After Effects: adding a property to a group (an effect, an animator…) invalidates the references a script
+    // already holds to that group's other members; looking them up again by name or index gives a valid object.
+    addProperty(m) {
+        this.children = this.children.map(c => { const n = Object.create(Prop.prototype); Object.assign(n, c); c._invalid = true; return n; });
+        return this._add(m);
+    }
     get numProperties() { return this.children.length; }
-    setValue(v) { this.val = v; }
+    setValue(v) { this._check(); this.val = v; }
     get value() { return this.val; }
-    setValueAtTime(t, v) { this.keys.push([t, v]); this.keys.sort((a, b) => a[0] - b[0]); }
+    _check() { if (this._invalid) throw new Error("Object is invalid (reference held across addProperty)"); }
+    setValueAtTime(t, v) { this._check(); this.keys.push([t, v]); this.keys.sort((a, b) => a[0] - b[0]); }
     get numKeys() { return this.keys.length; }
     keyTime(i) { return this.keys[i - 1][0]; }
     keyValue(i) { return this.keys[i - 1][1]; }
