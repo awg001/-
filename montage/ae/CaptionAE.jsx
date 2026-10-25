@@ -1495,30 +1495,55 @@
         setPref("python", ePy.text); setPref("model", ddModel.selection.text);
         var q = qq;
         // seconds, not minutes: is Python there, and does it have the recogniser? (Macs often have several Pythons)
-        var chk = String(system.callSystem(q(ePy.text) + ' -c "import sys;print(\'Python \'+sys.version.split()[0]+\' \'+sys.executable);import faster_whisper;print(\'FW_OK\')"'));
+        var chk = String(system.callSystem(q(ePy.text) + ' -c "import sys,importlib.util as u;print(\'Python \'+sys.version.split()[0]+\' \'+sys.executable);print(\'FW_OK\' if u.find_spec(\'faster_whisper\') else \'FW_MISSING\')"'));
         if (!/Python \d/.test(chk)) { alert(whyFailed(chk) + "\n\nПодробности:\n" + chk.slice(-400)); return; }
         if (!/FW_OK/.test(chk)) { askInstall(chk); return; }
         // a separate file set per run, so a cancelled run finishing late cannot be mistaken for this one
         var id = new Date().getTime(), base = Folder.temp.fsName + "/captionae_" + id;
         var out = File(base + ".json"), prog = File(base + "_progress.txt");
         // file paths go as hex of their UTF-8 bytes: Windows' command line mangles non-Latin names ("A:\монтаж\...")
-        var args = q(py.fsName) + " hex:" + hexUtf8(L.source.file.fsName) + " hex:" + hexUtf8(out.fsName) + " " +
+        var args = "hex:" + hexUtf8(L.source.file.fsName) + " hex:" + hexUtf8(out.fsName) + " " +
             ddLang.selection.text + " " + ddModel.selection.text + " hex:" + hexUtf8(prog.fsName);
-        launch(args);
+        if (!launch(args)) return;
         job = { kind: "recognize", out: out, prog: prog, log: File(base + ".json.log"), failed: File(base + ".json.failed"), t0: new Date().getTime(),
             offset: L.startTime, name: L.name, model: ddModel.selection.text };
         bTrans.text = bPTrans.text = "Отменить распознавание";
-        status.text = "Запускаю распознавание (" + job.model + ")… AE можно пользоваться.";
-        job.task = app.scheduleTask("$.global.CaptionAE_poll()", 700, true);
+        status.text = "Запускаю распознавание (" + job.model + ")…";
+        watch(job, 700);
     };
 
     // ---------- background recognition / installation: one job at a time, watched by a scheduled task ----------
     var job = null;
     function qq(s) { return '"' + s + '"'; }
     // run Python with these arguments in the background: After Effects stays usable; CaptionAE_poll watches the files
+    // transcribe.py --spawn detaches the real run and returns at once (no inherited pipe keeps callSystem waiting)
     function launch(args) {
-        if ($.os.indexOf("Windows") >= 0) system.callSystem('cmd.exe /c start "Caption AE" /min ' + qq(ePy.text) + " " + args);
-        else system.callSystem(qq(ePy.text) + " " + args + " > /dev/null 2>&1 &");
+        var r = String(system.callSystem(qq(ePy.text) + " " + qq(File(scriptDir.fsName + "/transcribe.py").fsName) + " --spawn " + args));
+        if (/SPAWNED/.test(r)) return true;
+        alert(whyFailed(r) + "\n\nПодробности:\n" + r.slice(-500));
+        return false;
+    }
+    // Is AE's timer (app.scheduleTask) able to call back into this panel? Checked once when the panel opens.
+    // Yes: the job is watched in the background and AE stays usable. No: a progress window waits for it (Esc stops).
+    var asyncOK = false;
+    $.global.CaptionAE_ping = function () { asyncOK = true; };
+    try { app.scheduleTask("try{$.global.CaptionAE_ping()}catch(e){}", 300, false); } catch (ePing) {}
+    function watch(j, ms) {
+        if (asyncOK) { j.task = app.scheduleTask("try{$.global.CaptionAE_poll()}catch(e){}", ms, true); return; }
+        var pal = new Window("palette", "Caption AE"); pal.alignChildren = ["fill", "top"]; pal.margins = 14;
+        var t = pal.add("statictext", undefined, status.text, { truncate: "end" }); t.preferredSize = [420, 18];
+        var bar = pal.add("progressbar", undefined, 0, 100); bar.preferredSize = [420, 10];
+        pal.add("statictext", undefined, "Esc — отменить");
+        pal.show();
+        try {
+            while (job === j) {
+                $.global.CaptionAE_poll();
+                if (job !== j) break;
+                t.text = status.text; bar.value = j.pct || 0; pal.update();
+                if (ScriptUI.environment.keyboardState.keyName === "Escape") { cancelJob(); break; }
+                $.sleep(250);
+            }
+        } finally { pal.close(); }
     }
     // the recogniser is missing for the Python the panel uses: offer to install it there, from the panel
     function askInstall(info) {
@@ -1528,11 +1553,11 @@
             status.text = "Распознавание не установлено. Можно запустить install_windows.bat / install_mac.command из архива."; return;
         }
         var base = Folder.temp.fsName + "/captionae_install_" + new Date().getTime();
-        launch(qq(File(scriptDir.fsName + "/transcribe.py").fsName) + " --install hex:" + hexUtf8(base));
+        if (!launch("--install hex:" + hexUtf8(base))) return;
         job = { kind: "install", done: File(base + ".done"), failed: File(base + ".failed"), log: File(base + ".log"), t0: new Date().getTime() };
         bTrans.text = bPTrans.text = "Отменить распознавание";
         status.text = "Устанавливаю распознавание…";
-        job.task = app.scheduleTask("$.global.CaptionAE_poll()", 1000, true);
+        watch(job, 1000);
     }
     function pollInstall() {
         var secs = Math.round((new Date().getTime() - job.t0) / 1000);
@@ -1544,11 +1569,11 @@
                 "Можно запустить install_windows.bat / install_mac.command из архива.\n\nПодробности (конец журнала):\n" + log.slice(-600));
             return;
         }
-        status.text = "Устанавливаю распознавание… " + secs + " с. AE можно пользоваться.";
+        status.text = "Устанавливаю распознавание… " + secs + " с" + (asyncOK ? ". AE можно пользоваться." : "");
     }
     function endJob() {
         if (!job) return;
-        try { app.cancelTask(job.task); } catch (e) {}
+        try { if (job.task) app.cancelTask(job.task); } catch (e) {}
         bTrans.text = bPTrans.text = "Распознать речь слоя";
         var j = job; job = null;
         return j;
@@ -1591,8 +1616,9 @@
                 alert(whyFailed("") + "\n\nКоманда: " + ePy.text); return;
             }
             var st = job.prog.exists ? readFile(job.prog).split("|") : ["Запускаю распознавание", "0"];
-            var pct = Math.round(100 * (+st[1] || 0));
-            status.text = st[0] + (pct ? " — " + pct + " %" : "") + " (" + fmtTime(secs) .replace(/\.\d$/, "") + "). AE можно пользоваться; «Отменить распознавание» — остановить.";
+            var pct = job.pct = Math.round(100 * (+st[1] || 0));
+            status.text = st[0] + (pct ? " — " + pct + " %" : "") + " (" + fmtTime(secs).replace(/\.\d$/, "") + ")" +
+                (asyncOK ? ". AE можно пользоваться; «Отменить распознавание» — остановить." : "");
         } catch (e) { endJob(); fail("Не удалось получить результат распознавания.", e); }
     };
 

@@ -1,5 +1,6 @@
 """Speech → word timings for CaptionAE.jsx: python3 transcribe.py media.mp4 out.json [ru] [small] [progress.txt]
-Also: python3 transcribe.py --install <base> — installs faster-whisper into this very Python (see install()).
+Also: python3 transcribe.py --install <base> — installs faster-whisper into this very Python (see install());
+      python3 transcribe.py --spawn <any of the above> — runs it detached and returns at once (see spawn()).
 
 The panel runs it in the background (After Effects stays responsive) and watches files next to out.json:
 progress.txt — "stage text|fraction" while working; progress.txt.cancel — created by the panel to stop;
@@ -133,7 +134,24 @@ def install(base):
     open(base + ('.done' if ok else '.failed'), 'w').close()
 
 
+def spawn(args):
+    """Start transcribe.py with these args as a detached process and return at once. The panel calls this through
+    system.callSystem, which waits until every holder of its output pipe is gone: the child gets no inherited
+    handles (close_fds, DEVNULL), its own session / no console, so After Effects is released immediately."""
+    import subprocess
+    kw = dict(stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True)
+    if os.name == 'nt':
+        kw['creationflags'] = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    else:
+        kw['start_new_session'] = True
+    subprocess.Popen([sys.executable, os.path.abspath(__file__)] + args, **kw)
+    print('SPAWNED')
+
+
 if __name__ == '__main__':
+    if len(sys.argv) > 1 and sys.argv[1] == '--spawn':
+        spawn(sys.argv[2:])
+        sys.exit()
     if len(sys.argv) > 2 and sys.argv[1] == '--install':
         install(arg_path(sys.argv[2]))
         sys.exit()

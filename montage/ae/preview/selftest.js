@@ -30,8 +30,11 @@ let TASKS = 0, LAUNCHED = null;
 // system.callSystem: "python --version" answers like Python; the background launch is recorded and run by the test
 let HAS_FW = true, CONFIRM = true; const CONFIRMS = [];
 // "python -c …import faster_whisper" answers like a Python with (or without) the recogniser; launches are recorded
-const SYS = c => { if (/ -c "import sys/.test(c)) return "Python 3.13.1 /usr/bin/python3\n" + (HAS_FW ? "FW_OK" : "ModuleNotFoundError: No module named 'faster_whisper'");
-    LAUNCHED = c; return ""; };
+let REAL_SPAWN = null; const TASKQ = [];
+const SYS = c => { if (/ -c "import sys/.test(c)) return "Python 3.13.1 /usr/bin/python3\n" + (HAS_FW ? "FW_OK" : "FW_MISSING");
+    LAUNCHED = c;
+    if (REAL_SPAWN) return require("child_process").execSync(c.replace(/^"[^"]*"/, "python3"), { env: Object.assign({}, process.env, REAL_SPAWN) }).toString();
+    return /--spawn/.test(c) ? "SPAWNED" : ""; };
 let DIALOG_TEXT = "", OPEN_FILE = null;
 class Window extends Ctl { constructor(type, title) { super(type === "dialog" ? "dialog" : "window", null, title); } }
 class Panel {}
@@ -56,13 +59,14 @@ class FootageItem { constructor(f) { this.file = f; this.name = f.name; this.has
 class FolderItem { constructor(n) { this.name = n; } }
 const sandbox = { Window, Panel, SHOWN, File: FileS, Folder: FolderS, FootageItem, FolderItem,
     ImportOptions: function (f) { this.file = f; },
-    $: { fileName: path.join(AE, "CaptionAE.jsx"), os: "Windows", global: {} }, system: { callSystem: c => SYS(c) }, alert: m => LOG.push("ALERT: " + m), confirm: m => { CONFIRMS.push(m); return CONFIRM; } };
+    $: { fileName: path.join(AE, "CaptionAE.jsx"), os: "Windows", global: {}, sleep: ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms) },
+    ScriptUI: { environment: { keyboardState: { keyName: "" } } }, system: { callSystem: c => SYS(c) }, alert: m => LOG.push("ALERT: " + m), confirm: m => { CONFIRMS.push(m); return CONFIRM; } };
 mock.install(sandbox);
 mock.Layer.prototype.sourceRectAtTime = function () { return { left: -200, top: -50, width: 400, height: 100 }; };
 Object.assign(sandbox.app, {
     settings: { haveSetting: (s, k) => (s + k) in settings, getSetting: (s, k) => settings[s + k], saveSetting: (s, k, v) => { settings[s + k] = v; } },
     preferences: { getPrefAsLong: () => 1 }, beginUndoGroup() {}, endUndoGroup() {},
-    scheduleTask: () => ++TASKS, cancelTask() {},
+    scheduleTask: (code, ms, rep) => { TASKQ.push(code); return ++TASKS; }, cancelTask() {},
     project: { activeItem: null, get numItems() { return items.length; }, item: i => items[i - 1],
         importFile(o) { const it = new FootageItem(o.file); items.push(it); return it; },
         items: { addFolder(n) { const f = new FolderItem(n); items.push(f); return f; } } }
@@ -98,14 +102,29 @@ class WhisperModel:
 fs.writeFileSync(FW + "/audio.py", "import numpy as np\ndef decode_audio(m): return np.random.default_rng(0).normal(0, .1, 16000 * 3)\n");
 const MEDIA = OUT + "/монтаж/Sequence 01.mp4"; fs.mkdirSync(path.dirname(MEDIA), { recursive: true }); fs.writeFileSync(MEDIA, "x");
 vid.source = { file: { fsName: MEDIA, exists: true } }; comp.selectedLayers = [vid];
-const pyArgs = cmd => cmd.match(/"[^"]*transcribe\.py" (.*)$/)[1].split(" ");
+const pyArgs = cmd => cmd.match(/--spawn (.*)$/)[1].split(" ");
 const runPy = (args, env) => cp.spawnSync("python3", [path.join(AE, "transcribe.py"), ...args], { env: Object.assign({}, process.env, env) });
 const recErrs = [];
 const tabs0 = win.children.find(c => c.type === "tabbedpanel");
 const pEdit = (function f(c) { if (c.type === "edittext" && c.props.multiline) return c; for (const k of c.children) { const r = f(k); if (r) return r; } })(tabs0.children[1]);
+// 0) AE's timer cannot reach the panel (the ping never fired): the progress window waits for a really detached run
+REAL_SPAWN = { PYTHONPATH: OUT + "/fw" };
+const tSync = Date.now(); B("Распознать речь слоя").onClick(); REAL_SPAWN = null;
+const pal = SHOWN.find(w => w.text === "Caption AE");
+if (!pal || !pal.children.some(c => c.type === "progressbar")) recErrs.push("no progress window in sync mode");
+if (!/Двенадцать/.test(pEdit.text)) recErrs.push("sync mode: no text after waiting: " + status());
+console.log("sync mode (progress window):", (Date.now() - tSync) + " ms →", status().slice(0, 50));
+// Esc in the progress window stops it
+sandbox.ScriptUI.environment.keyboardState.keyName = "Escape"; REAL_SPAWN = { PYTHONPATH: OUT + "/fw" };
+B("Распознать речь слоя").onClick(); REAL_SPAWN = null; sandbox.ScriptUI.environment.keyboardState.keyName = "";
+if (!/отменено/.test(status()) || win.find("Распознать речь слоя") === null) recErrs.push("Esc did not cancel: " + status());
+// the timer works: the ping fires, everything below runs watched in the background
+TASKQ.splice(0).forEach(code => vm.runInContext(code, sandbox));
+const palsBefore = SHOWN.filter(w => w.text === "Caption AE").length;
 // 1) success
 B("Распознать речь слоя").onClick();
-if (!LAUNCHED || !/start "Caption AE" \/min/.test(LAUNCHED)) recErrs.push("not launched in background: " + LAUNCHED);
+if (!LAUNCHED || !/--spawn hex:/.test(LAUNCHED)) recErrs.push("not launched detached: " + LAUNCHED);
+if (SHOWN.filter(w => w.text === "Caption AE").length > palsBefore) recErrs.push("progress window shown although the timer works");
 if (win.find("Отменить распознавание") === null) recErrs.push("button did not turn into cancel");
 sandbox.$.global.CaptionAE_poll(); const st1 = status();
 { const pf = Buffer.from(pyArgs(LAUNCHED)[4].slice(4), "hex").toString(); fs.writeFileSync(pf, "Распознаю|0.420");
