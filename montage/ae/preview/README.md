@@ -28,3 +28,9 @@ ffmpeg -framerate 30 -i out/%04d.png -i montage/projects/zelimkhan/zelimkhan.mp4
 `node montage/ae/preview/ui_preview.js out` — запускает настоящий UI-код `CaptionAE.jsx` на заглушке ScriptUI и пишет
 `out/tab_N.html` по вкладке в тёмном стиле AE (снимки — Playwright). Так нашлась ошибка: значения по умолчанию
 «Появление/Уход» брались как последний пункт списка и после добавления «Без анимации» перестали совпадать с пресетом.
+
+## ExtendScript = ES3
+`ui_preview.js` перед запуском панели удаляет из песочницы всё, чего нет в ExtendScript After Effects:
+`Array.prototype.indexOf/map/filter/forEach/…`, `String.prototype.trim`, `JSON`, `Object.keys`, `bind`.
+Код, который на это опирается, падает здесь так же, как в AE (так нашлась ошибка v0.12:
+«Function STYLE_KEYS.indexOf is undefined» → пустая панель). Проверить старую версию: `JSX=путь/к/CaptionAE.jsx node ui_preview.js out`.

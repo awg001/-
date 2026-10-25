@@ -20,6 +20,13 @@ const SHOWN = [];
 class Window extends Ctl { constructor(type, title) { super("window", null, title); } }
 class Panel {}
 
+// ES5+ built-ins After Effects' ExtendScript does not have (its arrays have no indexOf, there is no JSON, no trim…)
+const ES3 = `(function (o, ks) { for (var i = 0; i < ks.length; i++) delete o[ks[i]]; })
+    (Array.prototype, ["indexOf", "lastIndexOf", "forEach", "map", "filter", "some", "every", "reduce", "reduceRight", "find", "findIndex", "includes", "fill"]);
+(function (o, ks) { for (var i = 0; i < ks.length; i++) delete o[ks[i]]; })
+    (String.prototype, ["trim", "trimStart", "trimEnd", "includes", "startsWith", "endsWith", "repeat", "padStart", "padEnd"]);
+delete Array.isArray; delete Object.keys; delete Object.create; delete Object.assign; delete Function.prototype.bind; delete Date.now; delete this.JSON;`;
+module.exports = { ES3 };
 const settings = {};
 if (process.env.OPEN) settings["CaptionAEsetOpen"] = "1"; // render with «Настройки» unfolded
 const sandbox = {
@@ -36,7 +43,9 @@ const sandbox = {
 };
 sandbox.global = sandbox;
 vm.createContext(sandbox);
-const src = fs.readFileSync(path.join(__dirname, "../CaptionAE.jsx"), "utf8").replace(/^﻿/, "");
+// ExtendScript is ES3: take away what it lacks, so code that leans on ES5 fails here as it does in After Effects
+vm.runInContext(ES3, sandbox);
+const src = fs.readFileSync(process.env.JSX || path.join(__dirname, "../CaptionAE.jsx"), "utf8").replace(/^﻿/, "");
 vm.runInContext(src, sandbox, { filename: "CaptionAE.jsx" });
 const win = sandbox.SHOWN[0];
 

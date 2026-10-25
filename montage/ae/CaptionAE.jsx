@@ -10,6 +10,8 @@
 
     // ---------- pure helpers (ES3: ExtendScript has no map/forEach/trim/JSON) ----------
     function trim(s) { return String(s).replace(/^\s+|\s+$/g, ""); }
+    // ExtendScript arrays have no indexOf (ES3)
+    function find(a, v) { for (var i = 0; i < a.length; i++) if (a[i] === v) return i; return -1; }
 
     // ExtendScript has no JSON object: eval only after the json2.js check that the text is pure JSON data
     function parseJSON(src) {
@@ -950,9 +952,9 @@
     var exNames = ["Микс"];
     for (si = 1; si < EXIT_KEYS.length; si++) exNames.push(EXITS[EXIT_KEYS[si]].name);
     var rS = g3.add("group"); rS.add("statictext", undefined, "Появление");
-    var ddStyle = rS.add("dropdownlist", undefined, names); ddStyle.selection = Math.min(+pref("style", String(STYLE_KEYS.indexOf("soft"))), names.length - 1); // default = storytelling preset
+    var ddStyle = rS.add("dropdownlist", undefined, names); ddStyle.selection = Math.min(+pref("style", String(find(STYLE_KEYS, "soft"))), names.length - 1); // default = storytelling preset
     var rE = g3.add("group"); rE.add("statictext", undefined, "Уход");
-    var ddExit = rE.add("dropdownlist", undefined, exNames); ddExit.selection = Math.min(+pref("exit", String(EXIT_KEYS.indexOf("soft"))), exNames.length - 1);
+    var ddExit = rE.add("dropdownlist", undefined, exNames); ddExit.selection = Math.min(+pref("exit", String(find(EXIT_KEYS, "soft"))), exNames.length - 1);
 
     var gm = g3.add("panel", undefined, "Что разрешено «Миксу»"); gm.alignChildren = ["left", "top"]; gm.spacing = 2;
     var MIX_UI = [["pop", "Pop"], ["slide", "Выезд"], ["blur", "Размытие"], ["cut", "Рубленый"], ["rise", "Подъём"],
@@ -1070,7 +1072,7 @@
             display: "whole", posY: 75, words: 4, zoom: false, accS: 100, noPunct: false, sfx: "none", sfxHit: false
         }][k];
         if (!P) return;
-        ddStyle.selection = STYLE_KEYS.indexOf(P.style); ddExit.selection = EXIT_KEYS.indexOf(P.exit);
+        ddStyle.selection = find(STYLE_KEYS, P.style); ddExit.selection = find(EXIT_KEYS, P.exit);
         eFont.text = P.font; eSize.text = P.size; cKara.value = P.kara; cUpper.value = P.upper; cStroke.value = P.stroke;
         cShadow.value = P.shadow; cHotHit.value = P.hotHit; eAcc.text = P.acc; eHl.text = "F7D640";
         for (var i = 0; i < TYPO.length; i++) if (TYPO[i][0] === P.typo) ddTypo.selection = i;
