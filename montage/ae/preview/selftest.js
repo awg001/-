@@ -25,6 +25,7 @@ class Ctl {
     }
     find(t) { if (this.text === t) return this; for (const c of this.children) { const r = c.find(t); if (r) return r; } return null; }
 }
+const findType = (c, t) => { if (c.type === t) return c; for (const k of c.children) { const r = findType(k, t); if (r) return r; } return null; };
 const SHOWN = [], LOG = [], WRITES = {}, settings = {};
 let TASKS = 0, LAUNCHED = null;
 // system.callSystem: "python --version" answers like Python; the background launch is recorded and run by the test
@@ -99,13 +100,33 @@ class WhisperModel:
                 time.sleep(0.05); yield type("S", (), {"words": [W(" " + t, i * 0.5, i * 0.5 + 0.4)], "end": i * 0.5 + 0.5})()
         return gen(), type("I", (), {"duration": 4.0})()
 `);
+// a stand-in PyAV (the real one is not needed to test the plumbing): 3 s of noise, resampled as transcribe.decode asks
+fs.mkdirSync(OUT + "/fw/av/audio", { recursive: true });
+fs.writeFileSync(OUT + "/fw/av/__init__.py", `import numpy as np
+from . import audio
+class _F:
+    pts = 0
+    def __init__(s, n): s.n = n
+    def to_ndarray(s): return (np.random.default_rng(1).normal(0, 3000, s.n)).astype(np.int16).reshape(1, -1)
+class _C:
+    def __init__(s): s.streams = type("St", (), {"audio": [1]})()
+    def __enter__(s): return s
+    def __exit__(s, *a): pass
+    def decode(s, audio=0): return [_F(16000) for _ in range(3)]
+def open(path, mode="r"):
+    import os
+    if not os.path.exists(path): raise FileNotFoundError(path)
+    return _C()
+`);
+fs.writeFileSync(OUT + "/fw/av/audio/__init__.py", "from . import resampler\n");
+fs.writeFileSync(OUT + "/fw/av/audio/resampler.py", "class AudioResampler:\n    def __init__(s, **k): pass\n    def resample(s, f): return [] if f is None else [f]\n");
 fs.writeFileSync(FW + "/audio.py", "import numpy as np\ndef decode_audio(m): return np.random.default_rng(0).normal(0, .1, 16000 * 3)\n");
 const MEDIA = OUT + "/монтаж/Sequence 01.mp4"; fs.mkdirSync(path.dirname(MEDIA), { recursive: true }); fs.writeFileSync(MEDIA, "x");
 vid.source = { file: { fsName: MEDIA, exists: true } }; comp.selectedLayers = [vid];
 const pyArgs = cmd => cmd.match(/--spawn (.*)$/)[1].split(" ");
 const runPy = (args, env) => cp.spawnSync("python3", [path.join(AE, "transcribe.py"), ...args], { env: Object.assign({}, process.env, env) });
 const recErrs = [];
-const tabs0 = win.children.find(c => c.type === "tabbedpanel");
+const tabs0 = findType(win, "tabbedpanel");
 const pEdit = (function f(c) { if (c.type === "edittext" && c.props.multiline) return c; for (const k of c.children) { const r = f(k); if (r) return r; } })(tabs0.children[1]);
 // 0) AE's timer cannot reach the panel (the ping never fired): the progress window waits for a really detached run
 REAL_SPAWN = { PYTHONPATH: OUT + "/fw" };
@@ -164,7 +185,9 @@ if (!/установлено/.test(status())) recErrs.push("install done status:
 CONFIRM = false; LAUNCHED = null; B("Распознать речь слоя").onClick();
 if (LAUNCHED || !/install_mac/.test(status())) recErrs.push("declined install: " + status());
 // 4c) recognition itself fails with "not installed" (e.g. a different Python at run time) → offer again
-HAS_FW = true; CONFIRM = true; B("Распознать речь слоя").onClick(); runPy(pyArgs(LAUNCHED), { PYTHONPATH: "" });
+fs.mkdirSync(OUT + "/nofw/faster_whisper", { recursive: true }); // hides any real install: "not installed" everywhere
+fs.writeFileSync(OUT + "/nofw/faster_whisper/__init__.py", "raise ImportError(\"No module named 'faster_whisper'\")\n");
+HAS_FW = true; CONFIRM = true; B("Распознать речь слоя").onClick(); runPy(pyArgs(LAUNCHED), { PYTHONPATH: OUT + "/nofw" });
 const nC = CONFIRMS.length; sandbox.$.global.CaptionAE_poll();
 if (CONFIRMS.length !== nC + 1) recErrs.push("run-time missing recogniser did not offer install");
 sandbox.$.global.CaptionAE_poll(); // the install job it started
@@ -173,7 +196,7 @@ console.log(recErrs.length ? "RECOGNITION ERRORS:\n" + recErrs.join("\n") : "rec
 
 // ---------- full matrix: every option of every tab ----------
 const errs = [], ok = [];
-const tabsP = win.children.find(c => c.type === "tabbedpanel");
+const tabsP = findType(win, "tabbedpanel");
 const all = (root, type) => { const r = []; (function w(c) { if (c.type === type) r.push(c); c.children.forEach(w); })(root); return r; };
 const dd = (tab, i) => all(tabsP.children[tab], "dropdownlist")[i];
 function click(label, tab, name) {

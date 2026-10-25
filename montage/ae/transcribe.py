@@ -17,6 +17,39 @@ db = how much louder than the speaker's median the word was said (Caption AE tur
 import json, os, sys
 
 
+def decode(media, sr=16000):
+    """Media file -> mono float32 at 16 kHz, read with PyAV directly. faster-whisper's own decode_audio passes
+    av.open(metadata_errors=...), which PyAV 19 removed ("unexpected keyword argument 'metadata_errors'"), so a
+    fresh install breaks; this works with old and new PyAV alike."""
+    try:
+        import av
+    except ImportError as ex:  # not "recogniser missing": faster-whisper is there, its PyAV is broken
+        raise RuntimeError('PyAV (av) не загружается: %s. Переустановите: pip install --force-reinstall av' % ex)
+    import numpy as np
+    out = []
+    with av.open(media, mode='r') as c:
+        if not c.streams.audio:
+            raise ValueError('В файле нет звуковой дорожки')
+        rs = av.audio.resampler.AudioResampler(format='s16', layout='mono', rate=sr)
+        for frame in c.decode(audio=0):
+            frame.pts = None
+            for f in rs.resample(frame):
+                out.append(f.to_ndarray().reshape(-1))
+        for f in rs.resample(None):  # flush
+            out.append(f.to_ndarray().reshape(-1))
+    return (np.concatenate(out).astype(np.float32) / 32768.0) if out else np.zeros(0, np.float32)
+
+
+AUDIO = None  # decoded once, shared by recognition and loudness
+
+
+def audio_of(media):
+    global AUDIO
+    if AUDIO is None:
+        AUDIO = decode(media)
+    return AUDIO
+
+
 class Cancelled(Exception):
     pass
 
@@ -39,7 +72,8 @@ def with_faster_whisper(media, lang, model):
     def run(device, compute):
         report('Загружаю модель %s (первый раз скачивается: small ~0,5 ГБ, medium ~1,5 ГБ, large-v3 ~3 ГБ)' % model)
         m = WhisperModel(model, device=device, compute_type=compute)
-        segs, info = m.transcribe(media, language=lang, word_timestamps=True, vad_filter=True)
+        report('Читаю звук')
+        segs, info = m.transcribe(audio_of(media), language=lang, word_timestamps=True, vad_filter=True)
         dur, out = max(info.duration or 0, 0.1), []
         report('Распознаю', 0)
         for s in segs:  # segments are lazy: errors (and the work) happen here
@@ -66,8 +100,7 @@ def with_openai_whisper(media, lang, model):
 def loudness(media, words):
     import numpy as np
     try:
-        from faster_whisper.audio import decode_audio
-        a = decode_audio(media)
+        a = audio_of(media)
     except ImportError:
         import whisper
         a = whisper.load_audio(media)

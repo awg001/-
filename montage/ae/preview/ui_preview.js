@@ -17,6 +17,7 @@ class Ctl {
     center() {} show() { SHOWN.push(this); } update() {}
 }
 const SHOWN = [];
+const findType = (c, t) => { if (c.type === t) return c; for (const k of c.children) { const r = findType(k, t); if (r) return r; } return null; };
 class Window extends Ctl { constructor(type, title) { super("window", null, title); } }
 class Panel {}
 
@@ -82,7 +83,7 @@ textarea{width:420px;resize:none}button{background:#3a3a3a;border:1px solid #555
 
 const out = process.argv[2] || "ui_out";
 fs.mkdirSync(out, { recursive: true });
-const tp = win.children.find(c => c.type === "tabbedpanel"), status = win.children.find(c => c.type === "statictext");
+const tp = findType(win, "tabbedpanel"), status = win.children.find(c => c.type === "statictext");
 tp.children.forEach((tab, i) => {
     const tabs = tp.children.map((t, j) => `<span class="tab${i === j ? " on" : ""}">${esc(t.text)}</span>`).join("");
     fs.writeFileSync(path.join(out, `tab_${i + 1}${process.env.OPEN && i === 0 ? "_open" : ""}.html`), `<!doctype html><meta charset="utf-8"><style>${css}</style>

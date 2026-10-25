@@ -943,7 +943,13 @@
     var win = thisObj instanceof Panel ? thisObj : new Window("palette", "Caption AE — субтитры, тряска, акценты", undefined, { resizeable: true });
     win.orientation = "column"; win.alignChildren = ["fill", "top"]; win.spacing = 6; win.margins = 10;
 
-    var tabs = win.add("tabbedpanel"); tabs.alignChildren = ["fill", "top"];
+    // the tabs sit in a viewport with a scrollbar: on a short screen (MacBook) the bottom stays reachable
+    var scrollRow = win.add("group"); scrollRow.orientation = "row"; scrollRow.alignChildren = ["fill", "top"]; scrollRow.spacing = 2;
+    scrollRow.alignment = ["fill", "fill"];
+    var view = scrollRow.add("group"); view.orientation = "stack"; view.alignChildren = ["fill", "top"]; view.alignment = ["fill", "fill"];
+    var tabs = view.add("tabbedpanel"); tabs.alignChildren = ["fill", "top"]; tabs.alignment = ["fill", "top"];
+    var vsb = scrollRow.add("scrollbar", undefined, 0, 0, 100); vsb.alignment = ["right", "fill"]; vsb.preferredSize.width = 14;
+    vsb.stepdelta = 30;
     var tSub = tabs.add("tab", undefined, "Субтитры"); tSub.alignChildren = ["fill", "top"];
     var tPlain = tabs.add("tab", undefined, "Простые субтитры"); tPlain.alignChildren = ["fill", "top"];
     var tShake = tabs.add("tab", undefined, "Тряска"); tShake.alignChildren = ["fill", "top"];
@@ -951,7 +957,31 @@
     // Compact layout: text + preset + buttons always visible; fine-tuning folds away under «Настройки ▸»,
     // and the «Микс» checklist shows only while a Mix is chosen. Hidden controls get zero size so they take no room.
     function showCtl(c, on) { c.visible = on; c.maximumSize = on ? [4000, 4000] : [0, 0]; }
-    function relayout() { try { win.layout.layout(true); win.layout.resize(); } catch (eLay) {} }
+    // Lay out, then scroll if the tabs are taller than the room left above the status line. The tabs keep their full
+    // height (minimumSize) and are clipped by the viewport; the scrollbar moves them up. Any trouble — plain layout.
+    var scrollOK = true;
+    function applyScroll() { try { tabs.location = [tabs.location[0], -Math.round(vsb.value)]; } catch (e) {} }
+    function relayout() {
+        try {
+            showCtl(vsb, false); tabs.minimumSize = [0, 0]; view.maximumSize = scrollRow.maximumSize = [10000, 10000];
+            win.layout.layout(true);
+            if (!scrollOK || !status) return;
+            var m = win.margins, top = typeof m === "number" ? m : m.top !== undefined ? m.top : m[1];
+            var bot = typeof m === "number" ? m : m.bottom !== undefined ? m.bottom : m[3];
+            var avail = win.size.height - top - bot - status.size.height - win.spacing, nat = tabs.size.height;
+            if (nat > avail && avail > 120) {
+                tabs.minimumSize = [0, nat]; view.maximumSize = scrollRow.maximumSize = [10000, avail]; showCtl(vsb, true);
+                win.layout.layout(true);
+                vsb.maxvalue = nat - avail; vsb.jumpdelta = avail; if (vsb.value > vsb.maxvalue) vsb.value = vsb.maxvalue;
+                applyScroll();
+            } else vsb.value = 0;
+        } catch (eLay) {
+            scrollOK = false; // the panel still works, just without scrolling
+            try { showCtl(vsb, false); tabs.minimumSize = [0, 0]; view.maximumSize = scrollRow.maximumSize = [10000, 10000]; win.layout.layout(true); } catch (e2) {}
+        }
+    }
+    vsb.onChanging = vsb.onChange = applyScroll;
+    tabs.onChange = function () { vsb.value = 0; relayout(); }; // tabs differ in height
 
     var g1 = tSub.add("panel", undefined, "Текст"); g1.alignChildren = ["fill", "top"]; g1.spacing = 4;
     var r1 = g1.add("group");
@@ -1705,6 +1735,13 @@
         status.text = n ? "Субтитры удалены. Вернуть: Ctrl+Z." : "В этой композиции нет субтитров Caption AE.";
     };
 
-    win.onResizing = win.onResize = function () { this.layout.resize(); };
-    if (win instanceof Window) { win.center(); win.show(); } else { win.layout.layout(true); }
+    win.onResizing = win.onResize = function () { relayout(); };
+    if (win instanceof Window) { // floating window: never taller than the screen, the rest scrolls
+        win.layout.layout(true);
+        try {
+            var scr = $.screens[0], sh = (scr.bottom - scr.top) - 120;
+            if (win.preferredSize.height > sh || win.size.height > sh) win.size = [win.size.width, sh];
+        } catch (eScr) {}
+        relayout(); win.center(); win.show();
+    } else relayout();
 })(this);
