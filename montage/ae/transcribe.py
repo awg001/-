@@ -12,9 +12,20 @@ import json, os, sys
 
 def with_faster_whisper(media, lang, model):
     from faster_whisper import WhisperModel
-    m = WhisperModel(model, device='auto', compute_type='auto')
-    segs, _ = m.transcribe(media, language=lang, word_timestamps=True, vad_filter=True)
-    return [(w.word, w.start, w.end) for s in segs for w in (s.words or [])]
+
+    def run(device, compute):
+        m = WhisperModel(model, device=device, compute_type=compute)
+        segs, _ = m.transcribe(media, language=lang, word_timestamps=True, vad_filter=True)
+        return [(w.word, w.start, w.end) for s in segs for w in (s.words or [])]  # segments are lazy: errors surface here
+
+    try:
+        return run('auto', 'auto')  # an NVIDIA card is used when its CUDA libraries are installed
+    except (RuntimeError, OSError) as ex:
+        # a GPU without cuBLAS/cuDNN (e.g. "cublas64_12.dll is not found") — the processor always works
+        if not any(k in str(ex).lower() for k in ('cuda', 'cublas', 'cudnn', 'gpu', '.dll', '.so')):
+            raise
+        print('GPU unavailable (%s), using CPU' % ex)
+        return run('cpu', 'int8')
 
 
 def with_openai_whisper(media, lang, model):

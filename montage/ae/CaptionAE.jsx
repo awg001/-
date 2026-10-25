@@ -896,7 +896,7 @@
             return "Не удалось скачать модель распознавания (ошибка сертификата).\nMac: Программы → Python 3.x → «Install Certificates.command». Затем повторите.";
         if (/HTTP|Connection|resolve|timed out|huggingface/i.test(log))
             return "Не удалось скачать модель распознавания — нужен интернет при первом запуске. Проверьте сеть и повторите.";
-        if (/not recognized|не является|not found|не найден/i.test(log) || !/Traceback/.test(log))
+        if (!/Traceback/.test(log)) // no Python traceback at all: Python itself did not start
             return "Python не запустился.\nВ «Настройки ▸» в поле Python впишите: python (или py). На Mac — путь из команды which python3.";
         return "Распознавание не удалось.\nПришлите скриншот этого окна.";
     }
