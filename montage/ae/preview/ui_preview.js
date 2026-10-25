@@ -7,7 +7,7 @@ class Ctl {
     constructor(type, parent, text, props) {
         this.type = type; this.parent = parent; this.children = []; this.props = props || {};
         this.items = Array.isArray(text) ? text.slice() : null;
-        this.text = Array.isArray(text) ? "" : (text || ""); this.value = false; this._sel = null; this.visible = true;
+        this.text = Array.isArray(text) ? "" : (text || ""); this.value = false; this._sel = null; this.visible = true; this.preferredSize = { width: -1, height: -1 };
         this.orientation = type === "group" ? "row" : "column";
         this.layout = { layout() {}, resize() {} };
     }

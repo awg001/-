@@ -426,7 +426,7 @@
                         if (j === plan.big) { cr.font = opt.font2; cr.fontSize = Math.round(opt.size * opt.bigPct / 100); }
                         else if (bare(ws[j]).length <= 3) cr.fontSize = Math.round(opt.size * opt.smallPct / 100);
                     }
-                } else opt.note = "Разные шрифт и размер слов работают в AE 2024+; здесь только раскладка по строкам.";
+                } else opt.note = "Разные шрифты и размеры в фразе — только в AE 2024+.";
             }
             srcProp.setValue(td);
             // fit: measured before any animator exists, so allow for the karaoke (104%) and accent (112%) growth added later;
@@ -689,7 +689,15 @@
     }
 
     function removeSubs(comp) {
-        for (var i = comp.numLayers; i >= 1; i--) if (comp.layer(i).comment === TAG) comp.layer(i).remove();
+        var n = 0;
+        for (var i = comp.numLayers; i >= 1; i--) if (comp.layer(i).comment === TAG) { comp.layer(i).remove(); n++; }
+        return n;
+    }
+
+    // Russian number agreement: plural(5, ["фраза", "фразы", "фраз"]) -> "5 фраз"
+    function plural(n, f) {
+        var a = Math.abs(n) % 100, b = a % 10;
+        return n + " " + (a > 10 && a < 20 ? f[2] : b === 1 ? f[0] : b > 1 && b < 5 ? f[1] : f[2]);
     }
 
     var API = { trim: trim, parseJSONWords: parseJSONWords, parseSRT: parseSRT, groupPhrases: groupPhrases,
@@ -732,6 +740,12 @@
         return true;
     }
 
+    // An error names what failed and the way out; the technical detail goes last, for the bug report
+    function fail(what, e) {
+        alert(what + "\nОтмените (Ctrl+Z), если что-то успело появиться, и пришлите скриншот этого окна.\n\nПодробности: " +
+            e + (e && e.line ? ", строка " + e.line : ""));
+    }
+
     function hex(c) { return [parseInt(c.substr(0, 2), 16) / 255, parseInt(c.substr(2, 2), 16) / 255, parseInt(c.substr(4, 2), 16) / 255]; }
 
     var win = thisObj instanceof Panel ? thisObj : new Window("palette", "Caption AE — субтитры, тряска, акценты", undefined, { resizeable: true });
@@ -751,9 +765,6 @@
     var r1 = g1.add("group");
     var bTrans = r1.add("button", undefined, "Распознать речь слоя");
     var bImport = r1.add("button", undefined, "Импорт SRT / JSON");
-    var ddLang = r1.add("dropdownlist", undefined, ["ru", "en", "auto"]); ddLang.selection = 0;
-    var ddModel = r1.add("dropdownlist", undefined, ["small", "medium", "large-v3"]);
-    ddModel.selection = { small: 0, medium: 1, "large-v3": 2 }[pref("model", "small")] || 0;
     var editor = g1.add("edittext", undefined, "", { multiline: true, scrolling: true });
     editor.preferredSize = [380, 130];
     g1.add("statictext", undefined, "Строка = фраза. Enter делит фразу, *слово* = акцент.");
@@ -764,19 +775,28 @@
     var ddPreset = r4.add("dropdownlist", undefined, PRESETS); ddPreset.selection = Math.min(+pref("preset", "1"), PRESETS.length - 1);
     var r4b = tSub.add("group"); r4b.alignment = ["fill", "top"];
     var bBuild = r4b.add("button", undefined, "Создать субтитры");
-    var bRemove = r4b.add("button", undefined, "Удалить");
+    var bRemove = r4b.add("button", undefined, "Удалить субтитры");
     var bSet = r4b.add("button", undefined, "Настройки ▸");
 
     // ---------- fine-tuning (folded by default) ----------
     var sett = tSub.add("group"); sett.orientation = "column"; sett.alignChildren = ["fill", "top"]; sett.spacing = 6;
     var r1c = sett.add("group");
+    r1c.add("statictext", undefined, "Язык");
+    var ddLang = r1c.add("dropdownlist", undefined, ["ru", "en", "auto"]); ddLang.selection = 0;
+    ddLang.helpTip = "Язык речи для распознавания";
+    r1c.add("statictext", undefined, "Модель");
+    var ddModel = r1c.add("dropdownlist", undefined, ["small", "medium", "large-v3"]);
+    ddModel.selection = { small: 0, medium: 1, "large-v3": 2 }[pref("model", "small")] || 0;
+    ddModel.helpTip = "small — быстрее, medium и large-v3 — точнее, но дольше";
     r1c.add("statictext", undefined, "Python");
-    var ePy = r1c.add("edittext", undefined, pref("python", defaultPython())); ePy.characters = 30;
+    var ePy = r1c.add("edittext", undefined, pref("python", defaultPython())); ePy.characters = 14;
+    ePy.helpTip = "Путь к Python, в который установлен faster-whisper";
 
     var g2 = sett.add("panel", undefined, "Разбивка"); g2.alignChildren = ["left", "top"];
     var DISPLAY = [["flow", "По мере речи"], ["single", "По одному слову"], ["whole", "Фраза целиком"], ["block", "Блок 2 строки"]];
     var dNames = []; for (var di = 0; di < DISPLAY.length; di++) dNames.push(DISPLAY[di][1]);
     var g2r = g2.add("group");
+    g2r.add("statictext", undefined, "Показ");
     var ddDisplay = g2r.add("dropdownlist", undefined, dNames); ddDisplay.selection = Math.min(+pref("display", "0"), DISPLAY.length - 1);
     g2r.add("statictext", undefined, "Слов");
     var eWords = g2r.add("edittext", undefined, pref("maxWords", "3")); eWords.characters = 2;
@@ -854,9 +874,8 @@
     var LIGHT = [["none", "нет"], ["hot", "на акцентных"], ["all", "на всех"]];
     var lNames = []; for (si = 0; si < LIGHT.length; si++) lNames.push(LIGHT[si][1]);
     var t1r = g5.add("group");
+    t1r.add("statictext", undefined, "Крупное слово");
     var ddTypo = t1r.add("dropdownlist", undefined, tyNames); ddTypo.selection = Math.min(+pref("typo", "3"), TYPO.length - 1);
-    var cHeroUp = t1r.add("checkbox", undefined, "КАПСОМ"); cHeroUp.value = pref("heroUp", "1") === "1";
-    var cHeroFly = t1r.add("checkbox", undefined, "Влёт 160%"); cHeroFly.value = pref("heroFly", "1") === "1";
     var t2r = g5.add("group"); t2r.add("statictext", undefined, "Шрифт");
     var eFont2 = t2r.add("edittext", undefined, pref("font2", "PlayfairDisplay-Black")); eFont2.characters = 15;
     t2r.add("statictext", undefined, "Крупное %"); var eBig = t2r.add("edittext", undefined, pref("bigPct", "200")); eBig.characters = 3;
@@ -864,6 +883,8 @@
     var t4r = g5.add("group");
     t4r.add("statictext", undefined, "Свечение"); var ddGlow = t4r.add("dropdownlist", undefined, lNames); ddGlow.selection = +pref("glow", "0");
     t4r.add("statictext", undefined, "Блик"); var ddSweep = t4r.add("dropdownlist", undefined, lNames); ddSweep.selection = +pref("sweep", "0");
+    var cHeroUp = t4r.add("checkbox", undefined, "КАПСОМ"); cHeroUp.value = pref("heroUp", "1") === "1";
+    var cHeroFly = t4r.add("checkbox", undefined, "Влёт 160%"); cHeroFly.value = pref("heroFly", "1") === "1";
     g5.add("statictext", undefined, "Крупное = акцент *…* или самое длинное. Разные шрифты в фразе — AE 2024+.");
 
     function updMix() { showCtl(gm, ddStyle.selection.index === 0 || ddExit.selection.index === 0); relayout(); }
@@ -953,9 +974,9 @@
                 var sel = comp.selectedLayers, i;
                 if (!sel.length) { alert("Выделите слои."); }
                 for (i = 0; i < sel.length; i++) addShake(comp, sel[i], o);
-                if (sel.length) status.text = "Тряска добавлена на " + sel.length + " слой(ёв).";
+                if (sel.length) status.text = "Тряска добавлена: " + plural(sel.length, ["слой", "слоя", "слоёв"]) + ".";
             }
-        } catch (e) { alert("Ошибка: " + e + " (строка " + e.line + ")"); }
+        } catch (e) { fail("Не удалось добавить тряску.", e); }
         app.endUndoGroup();
     };
 
@@ -994,8 +1015,8 @@
                 if (cHShake.value) addShake(comp, sel[i], { kind: "hit", t0: t0, dur: 0.35, freq: 20, px: Math.round(16 * mult),
                     rot: 2 * mult, zoom: 0, sharp: 3, blur: cHBlur.value });
             }
-            status.text = "Акцент добавлен на " + sel.length + " слой(ёв).";
-        } catch (e) { alert("Ошибка: " + e + " (строка " + e.line + ")"); }
+            status.text = "Акцент добавлен: " + plural(sel.length, ["слой", "слоя", "слоёв"]) + ".";
+        } catch (e) { fail("Не удалось добавить акцент.", e); }
         app.endUndoGroup();
     };
 
@@ -1022,7 +1043,7 @@
             addHookTitle(comp, { l1: eL1.text, l2: eL2.text, color: hex(HOOK_COL[ddHC.selection.index][1]), t0: comp.time,
                 dur: Math.max(0.3, +eHkDur.text || 1.8), y: (+eHkY.text || 40) / 100, font: "Montserrat-ExtraBold", glow: cHkGlow.value });
             status.text = "Заголовок добавлен: слои HOOK 1 / HOOK 2.";
-        } catch (e) { alert("Ошибка: " + e + " (строка " + e.line + ")"); }
+        } catch (e) { fail("Не удалось добавить заголовок.", e); }
         app.endUndoGroup();
     };
 
@@ -1031,8 +1052,8 @@
         var sel = comp.selectedLayers, i;
         if (!sel.length) { alert("Выделите слои."); return; }
         app.beginUndoGroup("Caption AE: " + name);
-        try { for (i = 0; i < sel.length; i++) fn(comp, sel[i]); status.text = name + ": " + sel.length + " слой(ёв)."; }
-        catch (e) { alert("Ошибка: " + e + " (строка " + e.line + ")"); }
+        try { for (i = 0; i < sel.length; i++) fn(comp, sel[i]); status.text = "Добавлено (" + name + "): " + plural(sel.length, ["слой", "слоя", "слоёв"]) + "."; }
+        catch (e) { fail("Не удалось добавить " + name + ".", e); }
         app.endUndoGroup();
     }
     bGlow.onClick = function () { eachSelected("свечение", function (c, L) { addGlow(L, +eSize.text || 90); }); };
@@ -1066,9 +1087,9 @@
     var cPUp = p6.add("checkbox", undefined, "КАПС"); cPUp.value = pref("pUp", "0") === "1";
     var cPSh = p6.add("checkbox", undefined, "Мягкая тень"); cPSh.value = pref("pSh", "1") === "1";
     var p7 = gp.add("group");
-    var bPBuild = p7.add("button", undefined, "Добавить субтитры");
+    var bPBuild = p7.add("button", undefined, "Создать субтитры");
     var bPDel = p7.add("button", undefined, "Удалить субтитры");
-    gp.add("statictext", undefined, "Фиксированная длительность обрывается раньше, если следующие слова уже звучат.\nКаждый субтитр — обычный текстовый слой, правится руками.", { multiline: true });
+    gp.add("statictext", undefined, "Фиксированная длительность обрывается раньше, если следующие слова уже звучат.\n«Создать» заменяет прежние субтитры Caption AE (вернуть — Ctrl+Z).", { multiline: true });
 
     function plainInfo() { pInfo.text = words.length ? "Текст: " + words.length + " слов, " + fmtTime(words[words.length - 1].end) : "Текст: ещё не загружен"; }
     bPTrans.onClick = function () { bTrans.onClick(); plainInfo(); };
@@ -1089,16 +1110,17 @@
             glow: "none", sweep: "none", display: "whole", accentScale: 100, heroUpper: false, heroFly: false };
         app.beginUndoGroup("Caption AE: простые субтитры");
         try {
-            removeSubs(comp);
+            var old = removeSubs(comp);
             var made = buildSubs(comp, ph, opt, offset);
             comp.layer(CTRL).property("ADBE Effect Parade").property("Text").property(1).setValue(col);
-            status.text = "Готово: " + made + " субтитров, " + per + " сл. × " + lines + " стр." + (cPBreak.value ? " (с разрывами на паузах)" : " строго") +
-                (fixed ? ", по " + opt.fixedDur + " с" : ", по речи") + ".";
-        } catch (e) { alert("Ошибка: " + e + " (строка " + e.line + ")"); }
+            status.text = "Готово: " + plural(made, ["субтитр", "субтитра", "субтитров"]) + (fixed ? ", по " + opt.fixedDur + " с" : ", по речи") + "." +
+                (old ? " Прежние заменены — вернуть: Ctrl+Z." : "");
+        } catch (e) { fail("Не удалось создать субтитры.", e); }
         app.endUndoGroup();
     };
 
-    var status = win.add("statictext", undefined, "Выберите слой с голосом и нажмите «Распознать», или импортируйте SRT.", { truncate: "end" });
+    var status = win.add("statictext", undefined, "Выделите слой с голосом и нажмите «Распознать речь слоя» или импортируйте SRT.", { multiline: true });
+    status.alignment = ["fill", "bottom"]; status.preferredSize.height = 32; // two lines: long messages wrap instead of being cut
 
     function regroup() {
         if (!words.length) return;
@@ -1124,7 +1146,11 @@
         var q = function (s) { return '"' + s + '"'; };
         var log = system.callSystem(q(ePy.text) + " " + q(py.fsName) + " " + q(L.source.file.fsName) + " " + q(out.fsName) +
             " " + ddLang.selection.text + " " + ddModel.selection.text);
-        if (!out.exists) { alert("Распознавание не удалось:\n" + log); status.text = "Ошибка распознавания."; return; }
+        if (!out.exists) {
+            alert("Распознавание не удалось.\nПроверьте в «Настройки ▸» поле Python и что распознавание установлено " +
+                "(install_windows.bat или install_mac.command из архива), затем повторите.\n\nПодробности:\n" + log);
+            status.text = "Распознавание не удалось — см. сообщение."; return;
+        }
         words = parseJSONWords(readFile(out));
         offset = L.startTime; // word times are from the file start; the layer may be shifted in the comp
         srcLayerName = L.name;
@@ -1136,7 +1162,7 @@
         if (!f) return;
         var s = readFile(f);
         try { words = /\.json$/i.test(f.name) ? parseJSONWords(s) : parseSRT(s); }
-        catch (e) { alert("Не удалось прочитать файл: " + e); return; }
+        catch (e) { alert("Не удалось прочитать файл. Нужен SRT или JSON со словами (как из transcribe.py).\n\nПодробности: " + e); return; }
         offset = 0; regroup();
     };
 
@@ -1175,17 +1201,18 @@
         for (var k in keep) setPref(k, keep[k]);
         app.beginUndoGroup("Caption AE: создать");
         try {
-            removeSubs(comp);
+            var old = removeSubs(comp);
             var n = buildSubs(comp, textToPhrases(editor.text, words), opt, offset);
-            status.text = opt.note || ("Готово: " + n + " фраз. Общий вид — эффекты слоя " + CTRL + ".");
-        } catch (e) { alert("Ошибка: " + e + " (строка " + e.line + ")"); }
+            status.text = opt.note || ("Готово: " + plural(n, ["фраза", "фразы", "фраз"]) + ". Цвет и размер — слой " + CTRL + "." +
+                (old ? " Прежние заменены — вернуть: Ctrl+Z." : ""));
+        } catch (e) { fail("Не удалось создать субтитры.", e); }
         app.endUndoGroup();
     };
 
     bRemove.onClick = function () {
         var comp = activeComp(); if (!comp) return;
-        app.beginUndoGroup("Caption AE: удалить"); removeSubs(comp); app.endUndoGroup();
-        status.text = "Субтитры удалены.";
+        app.beginUndoGroup("Caption AE: удалить"); var n = removeSubs(comp); app.endUndoGroup();
+        status.text = n ? "Субтитры удалены. Вернуть: Ctrl+Z." : "В этой композиции нет субтитров Caption AE.";
     };
 
     win.onResizing = win.onResize = function () { this.layout.resize(); };
