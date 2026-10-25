@@ -63,6 +63,7 @@ class Layer {
     property(k) { return this.root.property(k); }
     get index() { return this.containingComp.layerList.indexOf(this) + 1; }
     moveToBeginning() { const L = this.containingComp.layerList; L.splice(L.indexOf(this), 1); L.unshift(this); }
+    moveToEnd() { const L = this.containingComp.layerList; L.splice(L.indexOf(this), 1); L.push(this); }
     moveBefore(x) { const L = this.containingComp.layerList; L.splice(L.indexOf(this), 1); L.splice(L.indexOf(x), 0, this); }
     remove() { const L = this.containingComp.layerList; L.splice(L.indexOf(this), 1); }
 }
@@ -79,6 +80,7 @@ class CompItem {
                 comp.layerList.unshift(L); return L;
             },
             addSolid(color, name, w, h) { const L = new Layer(comp, "solid", name); L.color = color; comp.layerList.unshift(L); return L; },
+            add(item) { const L = new Layer(comp, item.hasVideo === false ? "audio" : "footage", item.name); L.source = item; comp.layerList.unshift(L); return L; },
             addNull() { const L = new Layer(comp, "null", "Null"); comp.layerList.unshift(L); return L; }
         };
     }

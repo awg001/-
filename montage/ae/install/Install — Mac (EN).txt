@@ -12,12 +12,12 @@ STEP 1. COPY THE PLUGIN
 1. Quit After Effects.
 2. Finder → Applications → Adobe After Effects <version> → Scripts → ScriptUI Panels
    (full path: /Applications/Adobe After Effects 2025/Scripts/ScriptUI Panels/)
-3. Drag BOTH files there: CaptionAE.jsx and transcribe.py.
+3. Drag CaptionAE.jsx, transcribe.py and the CaptionAE_sounds folder (sounds) there.
    macOS will ask for your administrator password.
 4. Start After Effects → Window menu → CaptionAE.jsx at the bottom of the list.
 
 Without copying: File → Scripts → Run Script File… → choose CaptionAE.jsx
-(transcribe.py must be in the same folder).
+(transcribe.py and CaptionAE_sounds must be in the same folder).
 
 STEP 2. ALLOW THE SCRIPT TO USE FILES
 After Effects → Settings (Preferences in older versions) → Scripting & Expressions →
@@ -40,6 +40,11 @@ HOW TO USE
 4. Pick display mode, style, typography → «Создать субтитры» (Create captions).
 5. Every caption is a regular text layer: move it, scale it, edit it.
    Global size, height and colors live as effects on the CAPTION_CTRL layer.
+6. «Словарь замен…» (Replacement dictionary) — list the words recognition gets wrong once
+   (as recognised = correct, e.g. zelim han = Zelimkhan); every new text is fixed automatically.
+7. «Экспорт SRT» (Export SRT) — a subtitle file for YouTube, TikTok, Premiere.
+8. Sound: «Настройки ▸» (Settings) → «Звук» (Sound) — whoosh as captions appear, hit on accents.
+   Your own sounds: a folder with whoosh and hit subfolders (WAV/MP3).
 (The panel interface is in Russian; this guide gives the English meaning of each button.)
 
 FONTS

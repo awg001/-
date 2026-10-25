@@ -12,13 +12,13 @@
 2. Откройте папку:
    C:\Program Files\Adobe\Adobe After Effects <версия>\Support Files\Scripts\ScriptUI Panels\
    (например ...\Adobe After Effects 2025\Support Files\Scripts\ScriptUI Panels\)
-3. Скопируйте туда ОБА файла: CaptionAE.jsx и transcribe.py.
+3. Скопируйте туда файлы CaptionAE.jsx, transcribe.py и папку CaptionAE_sounds (звуки).
    Windows попросит права администратора — нажмите «Продолжить».
 4. Запустите After Effects → меню Window (Окно) → внизу списка CaptionAE.jsx.
    Панель можно пристыковать к любому краю, как обычную панель.
 
 Без копирования: File → Scripts → Run Script File… → выбрать CaptionAE.jsx
-(transcribe.py должен лежать в той же папке).
+(transcribe.py и CaptionAE_sounds должны лежать в той же папке).
 
 ШАГ 2. РАЗРЕШИТЬ СКРИПТУ РАБОТАТЬ С ФАЙЛАМИ
 Edit → Preferences → Scripting & Expressions →
@@ -41,6 +41,11 @@ Edit → Preferences → Scripting & Expressions →
 4. Выберите показ, стиль, типографику → «Создать субтитры».
 5. Каждая фраза — обычный текстовый слой: его можно двигать, масштабировать, править.
    Общий размер, высота и цвета — эффекты на слое CAPTION_CTRL.
+6. «Словарь замен…» — один раз впишите слова, которые распознавание пишет неправильно
+   (как распознало = как надо, например: зелим хан = Зелимхан). Дальше исправляется само.
+7. «Экспорт SRT» — файл субтитров для YouTube, TikTok, Premiere.
+8. Звук: «Настройки ▸» → «Звук» — whoosh на появление фраз и удар на акцентах.
+   Свои звуки: папка с подпапками whoosh и hit (WAV/MP3).
 
 ШРИФТЫ
 По умолчанию Montserrat ExtraBold и Playfair Display Black (бесплатно: fonts.google.com).

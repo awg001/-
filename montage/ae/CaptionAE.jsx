@@ -717,7 +717,119 @@
         return n + " " + (a > 10 && a < 20 ? f[2] : b === 1 ? f[0] : b > 1 && b < 5 ? f[1] : f[2]);
     }
 
-    var API = { trim: trim, parseJSONWords: parseJSONWords, parseSRT: parseSRT, groupPhrases: groupPhrases,
+    // ---------- replacement dictionary: Whisper's recurring mistakes, fixed once ----------
+    // One rule per line: "как распознало = как надо" (also -> or →). Case and ё/е do not matter; several words
+    // on the left merge into one ("зелим хан = Зелимхан"). Lines starting with # are notes.
+    function normWord(w) { return bare(w).toLowerCase().replace(/ё/g, "е"); }
+    function parseDict(text) {
+        var lines = String(text).replace(/\r/g, "\n").split("\n"), rules = [], i, m, from;
+        for (i = 0; i < lines.length; i++) {
+            m = /^(.+?)\s*(?:=|->|→)\s*(.+)$/.exec(trim(lines[i]));
+            if (!m || /^#/.test(m[1])) continue;
+            from = trim(m[1]).split(/\s+/);
+            for (var k = 0; k < from.length; k++) from[k] = normWord(from[k]);
+            if (from.join("") !== "") rules.push({ from: from, to: trim(m[2]).split(/\s+/) });
+        }
+        rules.sort(function (a, b) { return b.from.length - a.from.length; }); // longer phrases first
+        return rules;
+    }
+    // ws: [{w, start, end, ...}]. Keeps the punctuation around the replaced words and a capital at a sentence start;
+    // merged words take the span of the originals, split evenly. Returns { words, n } (n = places fixed).
+    function applyDict(ws, rules) {
+        var out = [], n = 0, i = 0, r, k, ok;
+        while (i < ws.length) {
+            for (r = 0; r < rules.length; r++) {
+                ok = i + rules[r].from.length <= ws.length;
+                for (k = 0; ok && k < rules[r].from.length; k++) ok = normWord(ws[i + k].w) === rules[r].from[k];
+                if (ok) break;
+            }
+            if (r === rules.length) { out.push(ws[i]); i++; continue; }
+            var a = ws[i], b = ws[i + rules[r].from.length - 1], to = rules[r].to;
+            var lead = /^[«"“„(\[]*/.exec(a.w)[0], tail = /[.,!?…;:—»"”)\]]*$/.exec(b.w)[0];
+            var cap = /^[«"“„(\[]*[A-ZА-ЯЁ]/.test(a.w), t0 = a.start, d = (b.end - a.start) / to.length;
+            for (k = 0; k < to.length; k++) {
+                var c = {}, key; for (key in a) c[key] = a[key];
+                var w = to[k];
+                if (k === 0 && cap) w = w.charAt(0).toUpperCase() + w.substring(1);
+                c.w = (k === 0 ? lead : "") + w + (k === to.length - 1 ? tail : "");
+                c.start = t0 + k * d; c.end = t0 + (k + 1) * d;
+                out.push(c);
+            }
+            i += rules[r].from.length; n++;
+        }
+        return { words: out, n: n };
+    }
+    // the same on the panel's text: keeps "00:01.2 | " prefixes and *accent* marks
+    function applyDictText(text, rules) {
+        var lines = String(text).replace(/\r/g, "\n").split("\n"), n = 0, i, j;
+        for (i = 0; i < lines.length; i++) {
+            var bar = lines[i].indexOf("|"), head = bar >= 0 ? lines[i].substring(0, bar + 1) + " " : "";
+            var body = trim(bar >= 0 ? lines[i].substring(bar + 1) : lines[i]);
+            if (!body) continue;
+            var toks = body.split(/\s+/), ws = [];
+            for (j = 0; j < toks.length; j++) {
+                var acc = /^\*.+\*$/.test(toks[j]);
+                ws.push({ w: acc ? toks[j].substring(1, toks[j].length - 1) : toks[j], start: j, end: j + 1, accent: acc });
+            }
+            var res = applyDict(ws, rules), outT = [];
+            for (j = 0; j < res.words.length; j++) outT.push(res.words[j].accent ? "*" + res.words[j].w + "*" : res.words[j].w);
+            lines[i] = head + outT.join(" "); n += res.n;
+        }
+        return { text: lines.join("\n"), n: n };
+    }
+
+    // ---------- SRT export: the same phrases and timing as the captions on screen ----------
+    function srtStamp(t) {
+        var ms = Math.max(0, Math.round(t * 1000)), h = Math.floor(ms / 3600000), m = Math.floor(ms / 60000) % 60,
+            sec = Math.floor(ms / 1000) % 60, r = ms % 1000;
+        function z(v, n) { v = String(v); while (v.length < n) v = "0" + v; return v; }
+        return z(h, 2) + ":" + z(m, 2) + ":" + z(sec, 2) + "," + z(r, 3);
+    }
+    // Lines end in \n; saveSrt writes them as CRLF. o: hold (s after the last word), fixedDur, noPunct/keepQE, lineWords (2-line captions)
+    function srtText(ph, offset, o) {
+        var out = [], n = 0, i, j;
+        for (i = 0; i < ph.length; i++) {
+            var p = o.noPunct ? cleanPhrase(ph[i], o.keepQE) : ph[i];
+            if (!p.length) continue;
+            var t0 = offset + p[0].start, last = offset + p[p.length - 1].end;
+            var next = i + 1 < ph.length ? offset + ph[i + 1][0].start : last + o.hold;
+            var t1 = Math.min(next, last + o.hold);
+            if (next - last < 0.6) t1 = next;
+            if (o.fixedDur) t1 = Math.min(next, t0 + o.fixedDur);
+            if (t1 - t0 < 0.2) t1 = t0 + 0.2;
+            var ws = []; for (j = 0; j < p.length; j++) ws.push(p[j].w);
+            var txt = o.lineWords && ws.length > o.lineWords ?
+                ws.slice(0, o.lineWords).join(" ") + "\n" + ws.slice(o.lineWords).join(" ") : ws.join(" ");
+            out.push(++n + "\n" + srtStamp(t0) + " --> " + srtStamp(t1) + "\n" + txt + "\n");
+        }
+        return out.join("\n");
+    }
+
+    // ---------- sound on events: whoosh as a phrase appears, hit on the accent word ----------
+    // phrases: "none" | "all" | "pause" (only after a pause ≥ 0.35 s, and the first) | "half" (every 2nd)
+    // A hit wins over a whoosh closer than 0.25 s; sounds of one kind are at least 0.25 s apart. Returns [{t, kind}].
+    function sfxPlan(ph, offset, phrases, accents) {
+        var ev = [], hits = [], i, k, t;
+        if (accents) { var am = accentMoments(ph, offset, 1e9); hits = am.A; }
+        for (i = 0; i < hits.length; i++) ev.push({ t: hits[i], kind: "hit" });
+        for (i = 0; phrases !== "none" && i < ph.length; i++) {
+            var inf = phraseInfo(ph, i);
+            if (phrases === "pause" && i && inf.gapBefore < 0.35) continue;
+            if (phrases === "half" && i % 2) continue;
+            t = offset + ph[i][0].start;
+            for (k = 0; k < hits.length && Math.abs(hits[k] - t) >= 0.25; k++) {}
+            if (k === hits.length) ev.push({ t: t, kind: "whoosh" });
+        }
+        ev.sort(function (a, b) { return a.t - b.t; });
+        var out = [], lastT = {};
+        for (i = 0; i < ev.length; i++) {
+            if (lastT[ev[i].kind] !== undefined && ev[i].t - lastT[ev[i].kind] < 0.25) continue;
+            lastT[ev[i].kind] = ev[i].t; out.push(ev[i]);
+        }
+        return out;
+    }
+
+    var API = { trim: trim, parseDict: parseDict, applyDict: applyDict, applyDictText: applyDictText, srtText: srtText, sfxPlan: sfxPlan, parseJSONWords: parseJSONWords, parseSRT: parseSRT, groupPhrases: groupPhrases,
         phrasesToText: phrasesToText, textToPhrases: textToPhrases, pickStyles: pickStyles, revealExpr: revealExpr,
         highlightExpr: highlightExpr, accentExpr: accentExpr, wrapLine: wrapLine, STYLES: STYLES,
         pickExits: pickExits, shakeExpr: shakeExpr, punchExpr: punchExpr, typoPlan: typoPlan, typoLayout: typoLayout, heroExpr: heroExpr,
@@ -726,7 +838,7 @@
     if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
 
     // ---------- UI ----------
-    var SEC = "CaptionAE", words = [], offset = 0, srcLayerName = "";
+    var SEC = "CaptionAE", words = [], offset = 0, srcLayerName = "", srcName = ""; // srcName: for the SRT file name
     var scriptDir = File($.fileName).parent;
 
     function pref(k, d) { return app.settings.haveSetting(SEC, k) ? app.settings.getSetting(SEC, k) : d; }
@@ -784,6 +896,11 @@
     var bImport = r1.add("button", undefined, "Импорт SRT / JSON");
     var editor = g1.add("edittext", undefined, "", { multiline: true, scrolling: true });
     editor.preferredSize = [380, 130];
+    var r1b = g1.add("group");
+    var bDict = r1b.add("button", undefined, "Словарь замен…");
+    bDict.helpTip = "Слова, которые распознавание пишет неправильно: имена, бренды, сленг. Исправляются в каждом новом тексте.";
+    var bSrt = r1b.add("button", undefined, "Экспорт SRT");
+    bSrt.helpTip = "Файл субтитров с этими фразами — для YouTube, TikTok, Premiere";
     g1.add("statictext", undefined, "Строка = фраза. Enter делит фразу, *слово* = акцент.");
 
     var r4 = tSub.add("group"); r4.alignment = ["fill", "top"];
@@ -910,6 +1027,19 @@
     var cHeroFly = t4r.add("checkbox", undefined, "Влёт 160%"); cHeroFly.value = pref("heroFly", "1") === "1";
     g5.add("statictext", undefined, "Крупное = акцент *…* или самое длинное. Разные шрифты в фразе — AE 2024+.");
 
+    var g6 = sett.add("panel", undefined, "Звук"); g6.alignChildren = ["left", "top"]; g6.spacing = 4;
+    var SFX_PH = [["none", "без звука"], ["all", "каждая"], ["pause", "после паузы"], ["half", "каждая 2-я"]];
+    var sfNames = []; for (si = 0; si < SFX_PH.length; si++) sfNames.push(SFX_PH[si][1]);
+    var u1 = g6.add("group"); u1.add("statictext", undefined, "Фразы: whoosh");
+    var ddSfx = u1.add("dropdownlist", undefined, sfNames); ddSfx.selection = Math.min(+pref("sfxPh", "0"), SFX_PH.length - 1);
+    var cSfxHit = u1.add("checkbox", undefined, "Удар на акцентах"); cSfxHit.value = pref("sfxHit", "0") === "1";
+    u1.add("statictext", undefined, "дБ"); var eSfxDb = u1.add("edittext", undefined, pref("sfxDb", "-10")); eSfxDb.characters = 3;
+    var u2 = g6.add("group"); u2.add("statictext", undefined, "Папка");
+    var eSfxDir = u2.add("edittext", undefined, pref("sfxDir", scriptDir.fsName + "/CaptionAE_sounds")); eSfxDir.characters = 26;
+    var bSfxDir = u2.add("button", undefined, "…"); bSfxDir.preferredSize = [28, -1];
+    eSfxDir.helpTip = "В папке — подпапки whoosh и hit с файлами WAV/MP3. Варианты чередуются, чтобы звук не повторялся.";
+    bSfxDir.onClick = function () { var f = Folder.selectDialog("Папка звуков (с подпапками whoosh и hit)"); if (f) eSfxDir.text = f.fsName; };
+
     function updMix() { showCtl(gm, ddStyle.selection.index === 0 || ddExit.selection.index === 0); relayout(); }
     ddStyle.onChange = updMix; ddExit.onChange = updMix;
     var setOpen = pref("setOpen", "0") === "1";
@@ -923,21 +1053,21 @@
         var P = [null, {
             style: "soft", exit: "soft", font: "PlayfairDisplay-Regular", size: 74, kara: false, upper: false, stroke: false, shadow: true,
             hotHit: false, acc: "FFFFFF", typo: "accent", font2: "PlayfairDisplay-Black", big: 200, small: 100, glow: 0, sweep: 0, heroUp: true, heroFly: true,
-            noPunct: false
+            noPunct: false, sfx: "none", sfxHit: false
         }, {
             style: "pop", exit: "fade", font: "Montserrat-ExtraBold", size: 80, kara: true, upper: true, stroke: true, shadow: true,
             hotHit: true, acc: "FFFFFF", typo: "plain", font2: "PlayfairDisplay-Black", big: 160, small: 100, glow: 0, sweep: 0, heroUp: true, heroFly: false,
-            noPunct: true
+            noPunct: true, sfx: "half", sfxHit: true
         }, {
             // Devin Jatho: white bold caps at Y≈1450 with a soft shadow (no hard outline), phrase pops, accent word red, punch-in on accents
             style: "jpop", exit: "fade", font: "Montserrat-ExtraBold", size: 92, kara: false, upper: true, stroke: false, shadow: true,
             hotHit: false, acc: "E51926", typo: "plain", font2: "PlayfairDisplay-Black", big: 160, small: 100, glow: 0, sweep: 0, heroUp: true, heroFly: false,
-            display: "whole", posY: 75, words: 3, zoom: true, accS: 100, noPunct: true
+            display: "whole", posY: 75, words: 3, zoom: true, accS: 100, noPunct: true, sfx: "pause", sfxHit: true
         }, {
             // plain captions: no reveal, no exit, no karaoke, no accents growing — just the text and the soft shadow
             style: "none", exit: "none", font: "Montserrat-ExtraBold", size: 72, kara: false, upper: false, stroke: false, shadow: true,
             hotHit: false, acc: "FFFFFF", typo: "plain", font2: "PlayfairDisplay-Black", big: 160, small: 100, glow: 0, sweep: 0, heroUp: false, heroFly: false,
-            display: "whole", posY: 75, words: 4, zoom: false, accS: 100, noPunct: false
+            display: "whole", posY: 75, words: 4, zoom: false, accS: 100, noPunct: false, sfx: "none", sfxHit: false
         }][k];
         if (!P) return;
         ddStyle.selection = STYLE_KEYS.indexOf(P.style); ddExit.selection = EXIT_KEYS.indexOf(P.exit);
@@ -947,6 +1077,8 @@
         eFont2.text = P.font2; eBig.text = P.big; eSmall.text = P.small; ddGlow.selection = P.glow; ddSweep.selection = P.sweep;
         cHeroUp.value = P.heroUp; cHeroFly.value = P.heroFly; cMblur.value = true; cZoom.value = !!P.zoom;
         cNoPunct.value = !!P.noPunct; cKeepQE.value = true; updPunct();
+        for (i = 0; i < SFX_PH.length; i++) if (SFX_PH[i][0] === P.sfx) ddSfx.selection = i;
+        cSfxHit.value = P.sfxHit;
         ePos.text = P.posY || 72; eWords.text = P.words || 3; eAccS.text = P.accS || 112;
         for (i = 0; i < DISPLAY.length; i++) if (DISPLAY[i][0] === (P.display || "flow")) ddDisplay.selection = i;
         updMix();
@@ -1090,6 +1222,7 @@
     var p0 = gp.add("group");
     var bPTrans = p0.add("button", undefined, "Распознать речь слоя");
     var bPImp = p0.add("button", undefined, "Импорт SRT / JSON");
+    var bPDict = p0.add("button", undefined, "Словарь…"); bPDict.helpTip = bDict.helpTip;
     var pInfo = gp.add("statictext", undefined, "Текст: ещё не загружен", { truncate: "end" }); pInfo.preferredSize = [380, 18];
     var p1 = gp.add("group"); p1.add("statictext", undefined, "Слов в строке");
     var ddPN = p1.add("dropdownlist", undefined, ["1", "2", "3", "4", "5", "6"]); ddPN.selection = Math.min(+pref("pN", "1"), 5);
@@ -1121,15 +1254,16 @@
     var p7 = gp.add("group");
     var bPBuild = p7.add("button", undefined, "Создать субтитры");
     var bPDel = p7.add("button", undefined, "Удалить субтитры");
+    var bPSrt = p7.add("button", undefined, "Экспорт SRT");
     gp.add("statictext", undefined, "Фиксированная длительность обрывается раньше, если следующие слова уже звучат.\n«Создать» заменяет прежние субтитры Caption AE (вернуть — Ctrl+Z).", { multiline: true });
 
     function plainInfo() { pInfo.text = words.length ? "Текст: " + words.length + " слов, " + fmtTime(words[words.length - 1].end) : "Текст: ещё не загружен"; }
     bPTrans.onClick = function () { bTrans.onClick(); plainInfo(); };
     bPImp.onClick = function () { bImport.onClick(); plainInfo(); };
     bPDel.onClick = function () { bRemove.onClick(); };
-    bPBuild.onClick = function () {
-        var comp = activeComp(); if (!comp) return;
-        if (!words.length) { alert("Сначала распознайте речь или импортируйте субтитры."); return; }
+    bPDict.onClick = function () { openDict(); };
+    // plain captions as set on the tab: the phrases and the options for buildSubs / srtText
+    function plainSetup() {
         var per = ddPN.selection.index + 1, lines = ddPL.selection.index + 1, n = per * lines, fixed = ddPDur.selection.index === 1;
         var keep = { pN: ddPN.selection.index, pLines: ddPL.selection.index, pLead: ePLead.text, pBreak: cPBreak.value ? 1 : 0, pDurMode: ddPDur.selection.index, pDur: ePDur.text, pHold: ePHold.text,
             pFont: ePFont.text, pSize: ePSize.text, pY: ePY.text, pCol: ePCol.text, pUp: cPUp.value ? 1 : 0, pSh: cPSh.value ? 1 : 0,
@@ -1137,11 +1271,20 @@
         for (var k in keep) setPref(k, keep[k]);
         var ph = groupPhrases(words, n, 999, cPBreak.value ? 0.4 : 1e9, !cPBreak.value);
         var col = hex(ePCol.text.replace("#", ""));
-        var opt = { en: {}, smart: false, style: "none", exit: "none", mblur: false, font: ePFont.text, size: +ePSize.text || 72,
+        return { ph: ph, col: col, fixed: fixed, opt: { en: {}, smart: false, style: "none", exit: "none", mblur: false, font: ePFont.text, size: +ePSize.text || 72,
             posY: (+ePY.text || 75) / 100, maxChars: 999, lineWords: lines === 2 ? per : 0, leadingPct: Math.max(50, +ePLead.text || 110), hold: Math.max(0, +ePHold.text || 0), fixedDur: fixed ? Math.max(0.2, +ePDur.text || 1.5) : 0,
             hl: col, accent: col, karaoke: false, upper: cPUp.value, stroke: false, shadow: cPSh.value, hotHit: false, typo: "plain",
             glow: "none", sweep: "none", display: "whole", accentScale: 100, heroUpper: false, heroFly: false,
-            noPunct: cPNoP.value, keepQE: cPQE.value };
+            noPunct: cPNoP.value, keepQE: cPQE.value } };
+    }
+    bPSrt.onClick = function () {
+        if (!words.length) { alert("Сначала распознайте речь или импортируйте субтитры."); return; }
+        var P = plainSetup(); saveSrt(P.ph, P.opt);
+    };
+    bPBuild.onClick = function () {
+        var comp = activeComp(); if (!comp) return;
+        if (!words.length) { alert("Сначала распознайте речь или импортируйте субтитры."); return; }
+        var P = plainSetup(), ph = P.ph, col = P.col, fixed = P.fixed, opt = P.opt;
         app.beginUndoGroup("Caption AE: простые субтитры");
         try {
             var old = removeSubs(comp);
@@ -1155,6 +1298,83 @@
 
     var status = win.add("statictext", undefined, "Выделите слой с голосом и нажмите «Распознать речь слоя» или импортируйте SRT.", { multiline: true });
     status.alignment = ["fill", "bottom"]; status.preferredSize.height = 32; // two lines: long messages wrap instead of being cut
+
+    // ---------- dictionary, SRT, sounds ----------
+    function dictText() { return String(pref("dict", "# пример:¶# зелим хан = Зелимхан")).replace(/¶/g, "\n"); }
+    // fix freshly recognised / imported words; returns the number of places fixed
+    function fixWords() {
+        var rules = parseDict(dictText()); if (!rules.length) return 0;
+        var r = applyDict(words, rules); words = r.words; return r.n;
+    }
+    function openDict() {
+        var d = new Window("dialog", "Словарь замен"); d.alignChildren = ["fill", "top"];
+        d.add("statictext", undefined, "Одна замена в строке: как распознало = как надо. Регистр и ё не важны.\n" +
+            "Несколько слов слева склеиваются в одно: зелим хан = Зелимхан. Строки с # — заметки.", { multiline: true });
+        var e = d.add("edittext", undefined, dictText(), { multiline: true, scrolling: true }); e.preferredSize = [400, 200];
+        var r = d.add("group"); r.alignment = ["right", "top"];
+        var bOk = r.add("button", undefined, "Сохранить и исправить"), bNo = r.add("button", undefined, "Отмена");
+        bOk.onClick = function () { d.close(1); }; bNo.onClick = function () { d.close(2); };
+        if (d.show() !== 1) return;
+        setPref("dict", e.text.replace(/\r\n|\r|\n/g, "¶"));
+        var rules = parseDict(e.text), nW = 0, nT = 0;
+        if (!rules.length) { status.text = "Словарь пуст — в каждой строке нужно «было = стало»."; return; }
+        if (words.length) { var rw = applyDict(words, rules); words = rw.words; nW = rw.n; }
+        if (trim(editor.text)) { var rt = applyDictText(editor.text, rules); editor.text = rt.text; nT = rt.n; }
+        plainInfo();
+        status.text = "Словарь сохранён: " + plural(rules.length, ["замена", "замены", "замен"]) + ". Исправлено мест в тексте: " +
+            Math.max(nW, nT) + ". Новые тексты исправляются сами.";
+    }
+    bDict.onClick = openDict;
+
+    function saveSrt(ph, o) {
+        var txt = srtText(ph, offset, { hold: o.hold, fixedDur: o.fixedDur, noPunct: o.noPunct, keepQE: o.keepQE, lineWords: o.lineWords });
+        if (!txt) { alert("Нет фраз для экспорта."); return; }
+        var name = (srcName || "subtitles").replace(/\.[^.]+$/, "") + ".srt";
+        var f = new File(Folder.desktop.fsName + "/" + name).saveDlg("Сохранить субтитры SRT", $.os.indexOf("Windows") >= 0 ? "SRT:*.srt" : undefined);
+        if (!f) return;
+        if (!/\.srt$/i.test(f.name)) f = new File(f.fsName + ".srt");
+        f.encoding = "UTF-8"; f.lineFeed = "Windows"; // CRLF: what YouTube, Premiere and players expect
+        if (!f.open("w")) { alert("Не удалось записать файл:\n" + f.fsName + "\nВыберите другую папку."); return; }
+        f.write(txt); f.close();
+        status.text = "SRT сохранён: " + f.name + " — " + plural(txt.split(" --> ").length - 1, ["субтитр", "субтитра", "субтитров"]) + ".";
+    }
+    bSrt.onClick = function () {
+        if (!words.length || !trim(editor.text)) { alert("Сначала распознайте речь или импортируйте субтитры."); return; }
+        saveSrt(textToPhrases(editor.text, words), { hold: 0.4, noPunct: cNoPunct.value, keepQE: cKeepQE.value });
+    };
+
+    var WHOOSH_LEAD = 0.18; // the bundled whooshes peak 0.18 s in (sounds/make_sounds.py): the peak lands on the phrase
+    function soundFiles(dir) {
+        var f = Folder(dir), a;
+        if (!f.exists) return [];
+        a = f.getFiles(function (x) { return x instanceof File && /\.(wav|mp3|aiff?|m4a)$/i.test(x.name); });
+        a.sort(function (x, y) { return x.name < y.name ? -1 : 1; });
+        return a;
+    }
+    function importOnce(file) {
+        var i, it, bin = null;
+        for (i = 1; i <= app.project.numItems; i++) {
+            it = app.project.item(i);
+            if (it instanceof FootageItem && it.file && it.file.fsName === file.fsName) return it;
+            if (it instanceof FolderItem && it.name === "Caption AE — звуки") bin = it;
+        }
+        it = app.project.importFile(new ImportOptions(file));
+        it.parentFolder = bin || app.project.items.addFolder("Caption AE — звуки");
+        return it;
+    }
+    // sound layers sit under everything, tagged like the captions: «Удалить» and a rebuild replace them too
+    function addSfx(comp, plan, F, db) {
+        var used = { whoosh: 0, hit: 0 }, made = 0, i;
+        for (i = 0; i < plan.length; i++) {
+            var list = F[plan[i].kind]; if (!list.length) continue;
+            var L = comp.layers.add(importOnce(list[used[plan[i].kind]++ % list.length])); // variants take turns
+            L.startTime = plan[i].t - (plan[i].kind === "whoosh" ? WHOOSH_LEAD : 0);
+            L.name = "SFX " + plan[i].kind; L.comment = TAG;
+            L.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([db, db]);
+            L.moveToEnd(); made++;
+        }
+        return made;
+    }
 
     function regroup() {
         if (!words.length) return;
@@ -1187,8 +1407,10 @@
         }
         words = parseJSONWords(readFile(out));
         offset = L.startTime; // word times are from the file start; the layer may be shifted in the comp
-        srcLayerName = L.name;
+        srcLayerName = srcName = L.name;
+        var fx = fixWords();
         regroup();
+        if (fx) status.text += " Словарь исправил: " + fx + ".";
     };
 
     bImport.onClick = function () {
@@ -1197,7 +1419,10 @@
         var s = readFile(f);
         try { words = /\.json$/i.test(f.name) ? parseJSONWords(s) : parseSRT(s); }
         catch (e) { alert("Не удалось прочитать файл. Нужен SRT или JSON со словами (как из transcribe.py).\n\nПодробности: " + e); return; }
-        offset = 0; regroup();
+        offset = 0; srcName = f.name; srcLayerName = "";
+        var fx = fixWords();
+        regroup();
+        if (fx) status.text += " Словарь исправил: " + fx + ".";
     };
 
     bRegroup.onClick = regroup;
@@ -1232,14 +1457,26 @@
             heroUp: cHeroUp.value ? 1 : 0, heroFly: cHeroFly.value ? 1 : 0, preset: ddPreset.selection.index, voice: cVoice.value ? 1 : 0, thr: eThr.text, font: eFont.text, size: eSize.text,
             posY: ePos.text, hl: eHl.text, acc: eAcc.text, kara: cKara.value ? 1 : 0, upper: cUpper.value ? 1 : 0,
             stroke: cStroke.value ? 1 : 0, shadow: cShadow.value ? 1 : 0, noPunct: cNoPunct.value ? 1 : 0, keepQE: cKeepQE.value ? 1 : 0,
-            zoom: cZoom.value ? 1 : 0, zoomAmt: eZoom.text, accS: eAccS.text, zoomKind: ddZoomKind.selection.index };
+            zoom: cZoom.value ? 1 : 0, zoomAmt: eZoom.text, accS: eAccS.text, zoomKind: ddZoomKind.selection.index,
+            sfxPh: ddSfx.selection.index, sfxHit: cSfxHit.value ? 1 : 0, sfxDb: eSfxDb.text, sfxDir: eSfxDir.text };
         for (var k in keep) setPref(k, keep[k]);
+        var ph = textToPhrases(editor.text, words);
+        var plan = sfxPlan(ph, offset, SFX_PH[ddSfx.selection.index][0], cSfxHit.value);
+        var SF = { whoosh: [], hit: [] };
+        if (plan.length) {
+            SF = { whoosh: soundFiles(eSfxDir.text + "/whoosh"), hit: soundFiles(eSfxDir.text + "/hit") };
+            if (!SF.whoosh.length && !SF.hit.length) {
+                alert("В папке звуков нет файлов:\n" + eSfxDir.text + "\nНужны подпапки whoosh и hit с WAV/MP3 (папка CaptionAE_sounds из архива).\n" +
+                    "Укажите её в «Настройки ▸» → «Звук» или выключите звук."); return;
+            }
+        }
         app.beginUndoGroup("Caption AE: создать");
         try {
             var old = removeSubs(comp);
-            var n = buildSubs(comp, textToPhrases(editor.text, words), opt, offset);
-            status.text = opt.note || ("Готово: " + plural(n, ["фраза", "фразы", "фраз"]) + ". Цвет и размер — слой " + CTRL + "." +
-                (old ? " Прежние заменены — вернуть: Ctrl+Z." : ""));
+            var n = buildSubs(comp, ph, opt, offset);
+            var ns = plan.length ? addSfx(comp, plan, SF, +eSfxDb.text || -10) : 0;
+            status.text = opt.note || ("Готово: " + plural(n, ["фраза", "фразы", "фраз"]) + (ns ? ", " + plural(ns, ["звук", "звука", "звуков"]) : "") +
+                ". Цвет и размер — слой " + CTRL + "." + (old ? " Прежние заменены — вернуть: Ctrl+Z." : ""));
         } catch (e) { fail("Не удалось создать субтитры.", e); }
         app.endUndoGroup();
     };
