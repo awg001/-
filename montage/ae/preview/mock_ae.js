@@ -32,7 +32,10 @@ class Prop {
     keyTime(i) { return this.keys[i - 1][0]; }
     keyValue(i) { return this.keys[i - 1][1]; }
     setInterpolationTypeAtKey() {}
-    remove() { const s = this.parent.children; s.splice(s.indexOf(this), 1); }
+    remove() { // removing also invalidates references to the other members of the group, as in AE
+        this._check(); const g = this.parent; g.children.splice(g.children.indexOf(this), 1); this._invalid = true;
+        g.children = g.children.map(c => { const n = Object.create(Prop.prototype); Object.assign(n, c); c._invalid = true; return n; });
+    }
     // value at time t: keyframes interpolate linearly (AE's default for sliders)
     valueAt(t) {
         const k = this.keys;

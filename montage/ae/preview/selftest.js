@@ -1,0 +1,149 @@
+// Self-test of the whole Caption AE panel without After Effects: runs CaptionAE.jsx's real UI code in an ES3 sandbox
+// (like ExtendScript) over the AE mock (which invalidates references the way AE does), then presses every button
+// in every mode: presets, styles, exits, display modes, typography and light, toggles, recolour, SRT, plain captions,
+// shake (kind × target × rhythm × power), accent effects, glow, sweep, hook titles. Fails on any error or alert.
+// Usage: node selftest.js   → "N cases ok … NO ERRORS". Run it before every build_zip.py.
+// Drives the real Caption AE panel handlers in Node: ScriptUI stub (from ui_preview.js) + AE mock (mock_ae.js).
+const fs = require("fs"), path = require("path"), vm = require("vm");
+const OUT = require("os").tmpdir() + "/captionae_selftest";
+const AE = process.argv[2] || path.join(__dirname, ".."), mock = require(path.join(AE, "preview/mock_ae.js"));
+class Ctl {
+    constructor(type, parent, text, props) {
+        this.type = type; this.parent = parent; this.children = []; this.props = props || {};
+        this.items = Array.isArray(text) ? text.slice() : null;
+        this.text = Array.isArray(text) ? "" : (text || ""); this.value = false; this._sel = null; this.visible = true; this.enabled = true;
+        this.preferredSize = { width: -1, height: -1 }; this.layout = { layout() {}, resize() {} };
+    }
+    add(type, b, text, props) { const c = new Ctl(type, this, text, props); this.children.push(c); return c; }
+    set selection(v) { this._sel = typeof v === "number" ? v : v && v.index !== undefined ? v.index : null; }
+    get selection() { return this._sel === null || !this.items ? null : { index: this._sel, text: this.items[this._sel] }; }
+    center() {} update() {} close(v) { this._ret = v; }
+    show() {
+        if (this.type !== "dialog") { SHOWN.push(this); return; }
+        const e = this.children.find(c => c.type === "edittext"); LOG.push("dialog shows: " + JSON.stringify(e.text));
+        e.text = DIALOG_TEXT; return 1;
+    }
+    find(t) { if (this.text === t) return this; for (const c of this.children) { const r = c.find(t); if (r) return r; } return null; }
+}
+const SHOWN = [], LOG = [], WRITES = {}, settings = {};
+let DIALOG_TEXT = "", OPEN_FILE = null;
+class Window extends Ctl { constructor(type, title) { super(type === "dialog" ? "dialog" : "window", null, title); } }
+class Panel {}
+function FileS(p) {
+    if (!(this instanceof FileS)) return new FileS(p);
+    this.fsName = p; this.name = path.basename(p); this.parent = { fsName: path.dirname(p) };
+}
+FileS.prototype = {
+    get exists() { return fs.existsSync(this.fsName); },
+    open(m) { this.m = m; return true; }, read() { return fs.readFileSync(this.fsName, "utf8"); },
+    write(s) { WRITES[this.fsName] = { text: s, lineFeed: this.lineFeed, encoding: this.encoding }; }, close() {},
+    saveDlg() { return new FileS(OUT + "/" + this.name.replace(".srt", "")); }
+};
+FileS.openDialog = () => OPEN_FILE;
+function FolderS(p) {
+    return { fsName: p, get exists() { return fs.existsSync(p); },
+        getFiles(fn) { return fs.readdirSync(p).map(n => new FileS(path.join(p, n))).filter(fn); } };
+}
+FolderS.temp = { fsName: OUT }; FolderS.desktop = { fsName: "/Users/me/Desktop" }; FolderS.selectDialog = () => null;
+const items = [];
+class FootageItem { constructor(f) { this.file = f; this.name = f.name; this.hasVideo = false; } }
+class FolderItem { constructor(n) { this.name = n; } }
+const sandbox = { Window, Panel, SHOWN, File: FileS, Folder: FolderS, FootageItem, FolderItem,
+    ImportOptions: function (f) { this.file = f; },
+    $: { fileName: path.join(AE, "CaptionAE.jsx"), os: "Windows" }, system: { callSystem: () => "" }, alert: m => LOG.push("ALERT: " + m) };
+mock.install(sandbox);
+mock.Layer.prototype.sourceRectAtTime = function () { return { left: -200, top: -50, width: 400, height: 100 }; };
+Object.assign(sandbox.app, {
+    settings: { haveSetting: (s, k) => (s + k) in settings, getSetting: (s, k) => settings[s + k], saveSetting: (s, k, v) => { settings[s + k] = v; } },
+    preferences: { getPrefAsLong: () => 1 }, beginUndoGroup() {}, endUndoGroup() {},
+    project: { activeItem: null, get numItems() { return items.length; }, item: i => items[i - 1],
+        importFile(o) { const it = new FootageItem(o.file); items.push(it); return it; },
+        items: { addFolder(n) { const f = new FolderItem(n); items.push(f); return f; } } }
+});
+const ES3 = `(function (o, ks) { for (var i = 0; i < ks.length; i++) delete o[ks[i]]; })
+    (Array.prototype, ["indexOf", "lastIndexOf", "forEach", "map", "filter", "some", "every", "reduce", "reduceRight", "find", "findIndex", "includes", "fill"]);
+(function (o, ks) { for (var i = 0; i < ks.length; i++) delete o[ks[i]]; })
+    (String.prototype, ["trim", "trimStart", "trimEnd", "includes", "startsWith", "endsWith", "repeat", "padStart", "padEnd"]);
+delete Array.isArray; delete Object.keys; delete Object.create; delete Object.assign; delete Function.prototype.bind; delete Date.now; delete this.JSON;`;
+sandbox.global = sandbox; vm.createContext(sandbox); vm.runInContext(ES3, sandbox);
+vm.runInContext(fs.readFileSync(path.join(AE, "CaptionAE.jsx"), "utf8").replace(/^﻿/, ""), sandbox);
+const win = SHOWN[0], B = t => { const c = win.find(t); if (!c) throw new Error("no control " + t); return c; };
+const status = () => win.children.find(c => c.type === "statictext").text;
+const comp = new sandbox.CompItem(1080, 1920, 12, 30); sandbox.app.project.activeItem = comp;
+const vid = comp.layers.addSolid([0,0,0], "talking_head.mp4", 1080, 1920); vid.source = { file: {} }; comp.selectedLayers = [vid];
+
+
+// ---------- full matrix: every option of every tab ----------
+const errs = [], ok = [];
+const tabsP = win.children.find(c => c.type === "tabbedpanel");
+const all = (root, type) => { const r = []; (function w(c) { if (c.type === type) r.push(c); c.children.forEach(w); })(root); return r; };
+const dd = (tab, i) => all(tabsP.children[tab], "dropdownlist")[i];
+function click(label, tab, name) {
+    const b = all(tabsP.children[tab], "button").find(x => x.text === name);
+    const before = LOG.length;
+    try { b.onClick(); } catch (e) { errs.push(label + " THROWS " + e.message); return; }
+    const al = LOG.slice(before).filter(l => l.startsWith("ALERT"));
+    if (al.length) errs.push(label + " ALERT " + al[0].replace(/\n/g, " ").slice(0, 200)); else ok.push(label);
+}
+fs.mkdirSync(OUT, { recursive: true });
+fs.writeFileSync(OUT + "/m.srt", "1\n00:00:00,000 --> 00:00:01,200\nДвенадцать лет царская власть\n\n2\n00:00:01,500 --> 00:00:03,000\nохотилась за одним человеком!\n\n3\n00:00:03,600 --> 00:00:05,000\nПочему он бежал?\n\n4\n00:00:05,200 --> 00:00:06,600\nИ тут — взрыв.\n");
+OPEN_FILE = new FileS(OUT + "/m.srt"); B("Импорт SRT / JSON").onClick();
+const editor = all(tabsP.children[0], "edittext").find(e => e.props.multiline);
+editor.text = editor.text.replace("власть", "*власть*").replace("взрыв.", "*взрыв.*");
+const T0 = tabsP.children[0];
+const ddStyle = all(T0, "dropdownlist").find(d => d.items && d.items[0] === "Микс" && d.items.length > 9);
+const ddExit = all(T0, "dropdownlist").filter(d => d.items && d.items[0] === "Микс")[1];
+const ddDisp = all(T0, "dropdownlist").find(d => d.items && d.items[0] === "По мере речи");
+const ddTypo = all(T0, "dropdownlist").find(d => d.items && d.items[0] === "Одинаковая");
+const ddLights = all(T0, "dropdownlist").filter(d => d.items && d.items[0] === "нет");
+const cb = n => all(T0, "checkbox").find(c => c.text === n);
+const pre = all(T0, "dropdownlist").find(d => d.items && d.items[0] === "Свои настройки");
+const sfxDir = all(T0, "edittext").find(e => /CaptionAE_sounds|nope|\/x/.test(e.text));
+sfxDir.text = AE + "/CaptionAE_sounds";
+for (let k = 0; k < pre.items.length; k++) { pre.selection = k; pre.onChange(); click("preset " + pre.items[k], 0, "Создать субтитры"); }
+pre.selection = 0;
+for (let s = 0; s < ddStyle.items.length; s++) { ddStyle.selection = s; ddExit.selection = s % ddExit.items.length; ddStyle.onChange && ddStyle.onChange();
+    click("style " + ddStyle.items[s] + " / exit " + ddExit.items[s % ddExit.items.length], 0, "Создать субтитры"); }
+for (let e = 0; e < ddExit.items.length; e++) { ddExit.selection = e; click("exit " + ddExit.items[e], 0, "Создать субтитры"); }
+for (let d = 0; d < ddDisp.items.length; d++) { ddDisp.selection = d; ddDisp.onChange(); editor.text = editor.text.replace(/\| (\S+)/, "| **"); click("display " + ddDisp.items[d], 0, "Создать субтитры"); }
+for (let t = 0; t < ddTypo.items.length; t++) for (let g = 0; g < 3; g++) { ddTypo.selection = t; ddLights[0].selection = g; ddLights[1].selection = g;
+    click("typo " + ddTypo.items[t] + " light " + g, 0, "Создать субтитры"); }
+for (const n of ["Караоке", "КАПС", "Обводка", "Тень", "Motion blur", "Толчок на акцентах", "Панч-зум видео", "Без знаков препинания", "Умный подбор", "Акценты по голосу, дБ"]) {
+    const c = cb(n); if (!c) { errs.push("no checkbox " + n); continue; } c.value = !c.value; click("toggle " + n, 0, "Создать субтитры"); }
+click("recolor", 0, "Перекрасить готовые");
+click("srt", 0, "Экспорт SRT");
+click("delete", 0, "Удалить субтитры");
+// plain tab
+const T1 = tabsP.children[1], pdd = all(T1, "dropdownlist");
+for (let n = 0; n < 6; n++) for (let l = 0; l < 2; l++) for (let du = 0; du < 2; du++) { pdd[0].selection = n; pdd[1].selection = l; pdd[2].selection = du;
+    click("plain " + (n + 1) + "x" + (l + 1) + " dur" + du, 1, "Создать субтитры"); }
+click("plain srt", 1, "Экспорт SRT");
+// shake: every kind x target x rhythm x power
+const T2 = tabsP.children[2], sdd = all(T2, "dropdownlist");
+const txtL = comp.layerList.find(l => l.kind === "text");
+for (let k = 0; k < 3; k++) for (let tg = 0; tg < 2; tg++) for (let rh = 0; rh < sdd[2].items.length; rh += 3) for (let pw = 0; pw < 3; pw++) {
+    sdd[0].selection = k; sdd[1].selection = tg; sdd[2].selection = rh; sdd[2].onChange(); sdd[3].selection = pw; sdd[3].onChange();
+    comp.selectedLayers = [txtL, vid]; comp.time = 1 + k;
+    click("shake " + sdd[0].items[k] + " on " + sdd[1].items[tg] + " rh" + rh + " pw" + pw, 2, "Добавить тряску с текущего кадра"); }
+// accent effects
+const T3 = tabsP.children[3], hdd = all(T3, "dropdownlist");
+for (let k = 0; k < hdd[0].items.length; k++) for (let pw = 0; pw < 3; pw++) for (let w = 0; w < 2; w++) {
+    hdd[0].selection = k; hdd[1].selection = pw; hdd[2].selection = w; comp.selectedLayers = [txtL, vid];
+    click("hit " + hdd[0].items[k] + " pw" + pw + " when" + w, 3, "Применить к выделенным слоям"); }
+click("glow", 3, "Свечение"); click("sweep", 3, "Блик (Light Sweep) с текущего кадра");
+for (let c = 0; c < hdd[3].items.length; c++) { hdd[3].selection = c; click("hook " + hdd[3].items[c], 3, "Добавить заголовок с текущего кадра"); }
+// stale-reference check on what was built: every effect slider named in an expression exists on its layer
+let refs = 0;
+for (const L of comp.layerList) for (const fx of (L.property("ADBE Effect Parade").children)) {
+    (function walk(p) { if (p.expression) { const m = p.expression.match(/effect\("([^"]+)"\)/g) || [];
+        for (const x of m) { refs++; const n = x.slice(8, -2); if (!L.property("ADBE Effect Parade").children.some(e => e.name === n)) errs.push("missing effect " + n + " on " + L.name); } }
+      p.children.forEach(walk); })(fx); }
+console.log(ok.length, "cases ok;", refs, "effect references checked");
+console.log(errs.length ? errs.join("\n") : "NO ERRORS");
+// the shake bug's signature: an "amount" slider with no keyframes = a shake that never moves
+let amounts = 0, dead = 0;
+for (const L of comp.layerList) for (const fx of L.property("ADBE Effect Parade").children)
+    if (/ amount$/.test(fx.name)) { amounts++; if (fx.property(1).keys.length < 2) dead++; }
+console.log(amounts, "shake amount sliders,", dead, "without keyframes");
+const kinds = {}; for (const L of comp.layerList) kinds[L.kind] = (kinds[L.kind] || 0) + 1; console.log("layers:", JSON.stringify(kinds));
+if (errs.length || dead) process.exit(1);

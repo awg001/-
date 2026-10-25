@@ -34,3 +34,9 @@ ffmpeg -framerate 30 -i out/%04d.png -i montage/projects/zelimkhan/zelimkhan.mp4
 `Array.prototype.indexOf/map/filter/forEach/…`, `String.prototype.trim`, `JSON`, `Object.keys`, `bind`.
 Код, который на это опирается, падает здесь так же, как в AE (так нашлась ошибка v0.12:
 «Function STYLE_KEYS.indexOf is undefined» → пустая панель). Проверить старую версию: `JSX=путь/к/CaptionAE.jsx node ui_preview.js out`.
+
+## Самопроверка всей панели
+`node selftest.js` — запускает настоящий код панели в песочнице ES3 поверх мока AE (мок, как AE, делает недействительными
+ссылки на свойства после addProperty/remove) и нажимает все кнопки во всех режимах: пресеты, стили, уходы, показ,
+типографика и свет, галочки, перекраска, SRT, простые субтитры, тряска (тип × цель × ритм × сила), акценты, свечение, блик,
+заголовки. Падает на любой ошибке или алерте и на тряске без ключей. Запускать перед каждой сборкой архива.

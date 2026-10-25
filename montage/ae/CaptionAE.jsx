@@ -394,7 +394,8 @@
         var ctrl = getCtrl(comp, opt), styles = pickStyles(ph, opt.style, opt.en, opt.smart);
         var exits = pickExits(ph, styles, opt.exit, opt.en, opt.smart);
         if (opt.mblur) comp.motionBlur = true;
-        var made = 0, i, j;
+        var made = 0, i, j, hotI;
+        function on(scope) { return scope === "all" || (scope === "hot" && hotI); } // light on all lines or accent lines
         for (i = 0; i < ph.length; i++) {
             var p = opt.noPunct ? cleanPhrase(ph[i], opt.keepQE) : ph[i], st = STYLES[styles[i]], ws = [], T = [], S = [], A = [];
             if (!p.length) continue; // the phrase was punctuation only
@@ -498,7 +499,6 @@
             tr.property("ADBE Scale").setValue([fit, fit]);
             tr.property("ADBE Scale").expression = ctrlScaleExpr;
             if (exits[i] === "fade") tr.property("ADBE Opacity").expression = "var f=3*thisComp.frameDuration;value*linear(time,outPoint-f,outPoint,1,0)";
-            function on(scope) { return scope === "all" || (scope === "hot" && hotI); }
             if (on(opt.sweep)) addSweep(layer, ta, 0.6);
             if (on(opt.glow)) addGlow(layer, opt.size);
             if (opt.shadow) {
