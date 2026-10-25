@@ -603,15 +603,16 @@
     // Deep Glow if the plugin is installed (its own defaults), otherwise the built-in Glow tuned for text
     function addGlow(layer, size) {
         var fxs = layer.property("ADBE Effect Parade"), dg = findEffect(/^deep glow/i);
-        if (dg) return fxs.addProperty(dg);
+        if (dg) { var d = fxs.addProperty(dg); d.name = "CAE Glow"; return d; }
         var g = fxs.addProperty("ADBE Glo2"), set = [[2, 55], [3, Math.round(size * 0.35)], [4, 1.3]], i;
         for (i = 0; i < set.length; i++) try { g.property(set[i][0]).setValue(set[i][1]); } catch (e) {}
+        g.name = "CAE Glow"; // «Снять эффекты Caption AE» finds it by this name
         return g;
     }
 
     // CC Light Sweep: the light band crosses the layer's visible box left to right in d seconds from t0
     function addSweep(layer, t0, d) {
-        var fx = layer.property("ADBE Effect Parade").addProperty("CC Light Sweep");
+        var fx = layer.property("ADBE Effect Parade").addProperty("CC Light Sweep"); fx.name = "CAE Light Sweep";
         fx.property(1).expression = "var r=sourceRectAtTime(time,false),p=Math.max(0,Math.min(1,(time-" + (Math.round(t0 * 1000) / 1000) + ")/" + d + "));\n" +
             "var p2=1-Math.pow(1-p,2);[r.left-r.height+(r.width+2*r.height)*p2,r.top+r.height/2]";
         try { fx.property(2).setValue(-25); } catch (e) {}
@@ -868,13 +869,295 @@
         return out;
     }
 
+    // ---------- sound layers (shared by the ScriptUI panel and the CEP panel) ----------
+    var WHOOSH_LEAD = 0.18; // the bundled whooshes peak 0.18 s in (sounds/make_sounds.py): the peak lands on the phrase
+    function soundFiles(dir) {
+        var f = Folder(dir), a;
+        if (!f.exists) return [];
+        a = f.getFiles(function (x) { return x instanceof File && /\.(wav|mp3|aiff?|m4a)$/i.test(x.name); });
+        a.sort(function (x, y) { return x.name < y.name ? -1 : 1; });
+        return a;
+    }
+    function importOnce(file) {
+        var i, it, bin = null;
+        for (i = 1; i <= app.project.numItems; i++) {
+            it = app.project.item(i);
+            if (it instanceof FootageItem && it.file && it.file.fsName === file.fsName) return it;
+            if (it instanceof FolderItem && it.name === "Caption AE — звуки") bin = it;
+        }
+        it = app.project.importFile(new ImportOptions(file));
+        it.parentFolder = bin || app.project.items.addFolder("Caption AE — звуки");
+        return it;
+    }
+    // sound layers sit under everything, tagged like the captions: «Удалить» and a rebuild replace them too
+    function addSfx(comp, plan, F, db) {
+        var used = { whoosh: 0, hit: 0 }, made = 0, i;
+        for (i = 0; i < plan.length; i++) {
+            var list = F[plan[i].kind]; if (!list.length) continue;
+            var L = comp.layers.add(importOnce(list[used[plan[i].kind]++ % list.length])); // variants take turns
+            L.startTime = plan[i].t - (plan[i].kind === "whoosh" ? WHOOSH_LEAD : 0);
+            L.name = "SFX " + plan[i].kind; L.comment = TAG;
+            L.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([db, db]);
+            L.moveToEnd(); made++;
+        }
+        return made;
+    }
+
+    // ---------- editing tools (Инструменты): anchor, align, layers, keys, text, project ----------
+    function tr(L, m) { return L.property("ADBE Transform Group").property(m); }
+    function valNow(p, t) { return p.numKeys ? p.valueAtTime(t, false) : p.value; }
+    // move a point by (dx, dy) on a position-like property, keyframes included; separated X/Y handled
+    function shiftPos(L, dx, dy) {
+        var P = tr(L, "ADBE Position"), k, v;
+        if (P.dimensionsSeparated) {
+            var X = tr(L, "ADBE Position_0"), Y = tr(L, "ADBE Position_1");
+            shiftProp(X, dx); shiftProp(Y, dy); return;
+        }
+        if (P.numKeys) for (k = 1; k <= P.numKeys; k++) { v = P.keyValue(k); v[0] += dx; v[1] += dy; P.setValueAtKey(k, v); }
+        else { v = P.value; v[0] += dx; v[1] += dy; P.setValue(v); }
+    }
+    function shiftProp(p, d) {
+        var k; if (p.numKeys) for (k = 1; k <= p.numKeys; k++) p.setValueAtKey(k, p.keyValue(k) + d); else p.setValue(p.value + d);
+    }
+    // a layer-space vector to comp space: scale, then rotation (parenting is not followed)
+    function layerVec(L, t, x, y) {
+        var S = valNow(tr(L, "ADBE Scale"), t), r = valNow(tr(L, "ADBE Rotate Z"), t) * Math.PI / 180;
+        var sx = x * S[0] / 100, sy = y * S[1] / 100;
+        return [sx * Math.cos(r) - sy * Math.sin(r), sx * Math.sin(r) + sy * Math.cos(r)];
+    }
+    // anchor to one of 9 points of the layer's visible box (r, c = 0..2), the layer stays where it is
+    function moveAnchor(L, t, r, c) {
+        var A = tr(L, "ADBE Anchor Point");
+        if (A.expression && A.expressionEnabled !== false) return false; // Caption AE captions centre themselves
+        var rc = L.sourceRectAtTime(t, false), a = valNow(A, t);
+        var nx = rc.left + rc.width * c / 2, ny = rc.top + rc.height * r / 2;
+        var d = layerVec(L, t, nx - a[0], ny - a[1]), v, k;
+        if (A.numKeys) for (k = 1; k <= A.numKeys; k++) { v = A.keyValue(k); v[0] += nx - a[0]; v[1] += ny - a[1]; A.setValueAtKey(k, v); }
+        else { v = A.value; v[0] = nx; v[1] = ny; A.setValue(v); }
+        shiftPos(L, d[0], d[1]);
+        return true;
+    }
+    // the layer's visible box in comp space at time t (no parenting)
+    function compBox(L, t) {
+        var rc = L.sourceRectAtTime(t, false), a = valNow(tr(L, "ADBE Anchor Point"), t), p = valNow(tr(L, "ADBE Position"), t);
+        var xs = [rc.left, rc.left + rc.width], ys = [rc.top, rc.top + rc.height], b = { l: 1e9, t: 1e9, r: -1e9, b: -1e9 }, i, j;
+        for (i = 0; i < 2; i++) for (j = 0; j < 2; j++) {
+            var v = layerVec(L, t, xs[i] - a[0], ys[j] - a[1]), x = p[0] + v[0], y = p[1] + v[1];
+            if (x < b.l) b.l = x; if (x > b.r) b.r = x; if (y < b.t) b.t = y; if (y > b.b) b.b = y;
+        }
+        return b;
+    }
+    // mode: left | hcenter | right | top | vcenter | bottom; to the comp frame, or to the selection's box
+    function alignLayers(comp, layers, mode, toSel) {
+        var t = comp.time, boxes = [], i, R = { l: 0, t: 0, r: comp.width, b: comp.height }, n = 0;
+        for (i = 0; i < layers.length; i++) boxes.push(layers[i].parent ? null : compBox(layers[i], t));
+        if (toSel) {
+            R = { l: 1e9, t: 1e9, r: -1e9, b: -1e9 };
+            for (i = 0; i < boxes.length; i++) if (boxes[i]) {
+                R.l = Math.min(R.l, boxes[i].l); R.t = Math.min(R.t, boxes[i].t); R.r = Math.max(R.r, boxes[i].r); R.b = Math.max(R.b, boxes[i].b);
+            }
+        }
+        for (i = 0; i < layers.length; i++) {
+            var B = boxes[i]; if (!B) continue;
+            var dx = mode === "left" ? R.l - B.l : mode === "right" ? R.r - B.r : mode === "hcenter" ? (R.l + R.r - B.l - B.r) / 2 : 0;
+            var dy = mode === "top" ? R.t - B.t : mode === "bottom" ? R.b - B.b : mode === "vcenter" ? (R.t + R.b - B.t - B.b) / 2 : 0;
+            shiftPos(layers[i], dx, dy); n++;
+        }
+        return n;
+    }
+    // a null at the centre of the selection; the selected layers become its children
+    function nullParent(comp, layers) {
+        var n = comp.layers.addNull(), i, cx = 0, cy = 0, a = 1e9, b = -1e9;
+        n.name = "Управление";
+        for (i = 0; i < layers.length; i++) {
+            var p = valNow(tr(layers[i], "ADBE Position"), comp.time); cx += p[0]; cy += p[1];
+            a = Math.min(a, layers[i].inPoint); b = Math.max(b, layers[i].outPoint);
+        }
+        if (layers.length) {
+            tr(n, "ADBE Position").setValue([cx / layers.length, cy / layers.length]);
+            n.moveBefore(layers[0]); n.inPoint = a; n.outPoint = b;
+            for (i = 0; i < layers.length; i++) if (layers[i] !== n) layers[i].parent = n;
+        }
+        return n;
+    }
+    function addAdjustment(comp, layers) {
+        var L = comp.layers.addSolid([1, 1, 1], "Корректирующий", comp.width, comp.height, comp.pixelAspect, comp.duration), i, a = 1e9, b = -1e9;
+        L.adjustmentLayer = true;
+        if (layers.length) {
+            for (i = 0; i < layers.length; i++) { a = Math.min(a, layers[i].inPoint); b = Math.max(b, layers[i].outPoint); }
+            L.moveBefore(layers[0]); L.inPoint = a; L.outPoint = b;
+        }
+        return L;
+    }
+    // inertial bounce after each keyframe; strength / frequency / decay are sliders on the layer
+    var BOUNCE_TAG = "// Caption AE bounce";
+    function bounceExpr() {
+        return BOUNCE_TAG + "\n" +
+            "var a=0.06,f=2.5,d=6;try{a=effect(\"Bounce сила\")(1)/100;f=effect(\"Bounce частота\")(1);d=effect(\"Bounce затухание\")(1);}catch(e){}\n" +
+            "var n=0;if(numKeys>0){n=nearestKey(time).index;if(key(n).time>time)n--;}\n" +
+            "if(n>1){var t=time-key(n).time,v=velocityAtTime(key(n).time-thisComp.frameDuration/10);value+v*a*Math.sin(f*t*2*Math.PI)/Math.exp(d*t);}else value;";
+    }
+    function addBounce(props) {
+        var n = 0, i, layers = [];
+        for (i = 0; i < props.length; i++) {
+            var p = props[i];
+            if (!p.canSetExpression || p.numKeys < 2 || /Opacity/.test(p.matchName)) continue;
+            p.expression = bounceExpr(); n++;
+            var L = p.propertyGroup(p.propertyDepth), seen = false, j;
+            for (j = 0; j < layers.length; j++) if (layers[j] === L) seen = true;
+            if (!seen) layers.push(L);
+        }
+        for (i = 0; i < layers.length; i++) {
+            var fx = layers[i].property("ADBE Effect Parade");
+            if (!fx.property("Bounce сила")) {
+                addEffect(layers[i], "ADBE Slider Control", "Bounce сила", 6);
+                addEffect(layers[i], "ADBE Slider Control", "Bounce частота", 2.5);
+                addEffect(layers[i], "ADBE Slider Control", "Bounce затухание", 6);
+            }
+        }
+        return n;
+    }
+    // easing of the selected keys: copy from one, paste onto others (interpolation + temporal ease)
+    var EASE = null;
+    function copyEase(props) {
+        for (var i = 0; i < props.length; i++) {
+            var p = props[i], ks = p.selectedKeys; if (!ks || !ks.length) continue;
+            var k = ks[0];
+            EASE = { inT: p.keyInInterpolationType(k), outT: p.keyOutInterpolationType(k),
+                inE: p.keyInTemporalEase(k), outE: p.keyOutTemporalEase(k) };
+            return true;
+        }
+        return false;
+    }
+    function fitEase(e, n) { var r = [], i; for (i = 0; i < n; i++) r.push(new KeyframeEase(e[Math.min(i, e.length - 1)].speed, e[Math.min(i, e.length - 1)].influence)); return r; }
+    function pasteEase(props) {
+        if (!EASE) return -1;
+        var n = 0, i, j;
+        for (i = 0; i < props.length; i++) {
+            var p = props[i], ks = p.selectedKeys; if (!ks) continue;
+            for (j = 0; j < ks.length; j++) {
+                var dims = p.keyInTemporalEase(ks[j]).length;
+                p.setInterpolationTypeAtKey(ks[j], EASE.inT, EASE.outT);
+                p.setTemporalEaseAtKey(ks[j], fitEase(EASE.inE, dims), fitEase(EASE.outE, dims)); n++;
+            }
+        }
+        return n;
+    }
+    // animated number: slider «Число» 0 → to over dur from t0; decimals, thousands spaces, prefix/suffix
+    function addCounter(comp, o) {
+        var L = comp.layers.addText("0"), src = L.property("ADBE Text Properties").property("ADBE Text Document"), td = src.value;
+        td.resetCharStyle(); td.font = o.font || "Montserrat-ExtraBold"; td.fontSize = o.size || 160; td.fillColor = [1, 1, 1];
+        td.justification = ParagraphJustification.CENTER_JUSTIFY; src.setValue(td);
+        L.name = "Счётчик";
+        var num = addEffect(L, "ADBE Slider Control", "Число", 0);
+        num.property(1).setValueAtTime(o.t0, o.from || 0); num.property(1).setValueAtTime(o.t0 + (o.dur || 2), o.to === undefined ? 100 : o.to);
+        addEffect(L, "ADBE Slider Control", "Знаков после запятой", o.dec || 0);
+        addEffect(L, "ADBE Checkbox Control", "Пробелы в тысячах", 1);
+        var q = function (s) { return '"' + String(s || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"'; };
+        src.expression = "var v=effect(\"Число\")(1).value,d=Math.max(0,Math.min(5,Math.round(effect(\"Знаков после запятой\")(1))));\n" +
+            "var s=v.toFixed(d),p=s.split(\".\");if(effect(\"Пробелы в тысячах\")(1)==1)p[0]=p[0].replace(/\\B(?=(\\d{3})+(?!\\d))/g,\"\\u00a0\");\n" +
+            q(o.prefix) + "+p.join(\",\")+" + q(o.suffix);
+        tr(L, "ADBE Anchor Point").expression = "var r=sourceRectAtTime(time,false);add([r.left+r.width/2,r.top+r.height/2],value)";
+        tr(L, "ADBE Position").setValue([comp.width / 2, comp.height / 2]);
+        return L;
+    }
+    // split a text layer into one layer per line or per word, each where it was (point text)
+    function measureRect(comp, td, text, just) {
+        var T = comp.layers.addText(text || " "), sp = T.property("ADBE Text Properties").property("ADBE Text Document"), d = sp.value;
+        d.font = td.font; d.fontSize = td.fontSize; try { d.tracking = td.tracking; } catch (e) {}
+        d.justification = just; sp.setValue(d);
+        var r = T.sourceRectAtTime(comp.time, false); T.remove();
+        return r;
+    }
+    function splitText(comp, L, mode) {
+        var src = L.property("ADBE Text Properties").property("ADBE Text Document"), td = src.value;
+        var A = tr(L, "ADBE Anchor Point");
+        if (A.expression || A.numKeys) return -1; // animated / self-centring anchors (Caption AE captions): not supported
+        var lines = String(td.text).split(/\r\n|\r|\n/), lead = td.autoLeading === false && td.leading ? td.leading : td.fontSize * 1.2;
+        var a = A.value, made = 0, k, j, LEFT = ParagraphJustification.LEFT_JUSTIFY;
+        for (k = 0; k < lines.length; k++) {
+            if (!lines[k].replace(/\s+/g, "")) continue;
+            var parts = [{ text: lines[k], dx: 0, just: td.justification }];
+            if (mode === "words") {
+                var ws = lines[k].split(/\s+/), lineRect = measureRect(comp, td, lines[k], td.justification), lineL = measureRect(comp, td, lines[k], LEFT);
+                parts = []; var pre = "";
+                for (j = 0; j < ws.length; j++) {
+                    if (!ws[j]) continue;
+                    var upTo = measureRect(comp, td, pre + ws[j], LEFT), wr = measureRect(comp, td, ws[j], LEFT);
+                    // where the word starts in the original line, relative to where it starts as a lone left-justified word
+                    var leftOrig = lineRect.left + (upTo.left + upTo.width - wr.width - lineL.left);
+                    parts.push({ text: ws[j], dx: leftOrig - wr.left, just: LEFT });
+                    pre += ws[j] + " ";
+                }
+            }
+            for (j = 0; j < parts.length; j++) {
+                var D = L.duplicate(), ds = D.property("ADBE Text Properties").property("ADBE Text Document"), dd = ds.value;
+                dd.text = parts[j].text; dd.justification = parts[j].just; ds.setValue(dd);
+                tr(D, "ADBE Anchor Point").setValue([a[0] - parts[j].dx, a[1] - k * lead].concat(a.length > 2 ? [a[2]] : []));
+                D.name = parts[j].text.substring(0, 30); made++;
+            }
+        }
+        if (made) L.enabled = false; // the original stays, switched off
+        return made;
+    }
+    // project panel: root items into folders by type (precomps = comps used in other comps)
+    function organizeProject() {
+        var P = app.project, folders = {}, n = 0, i, items = [];
+        function bin(name) {
+            if (folders[name]) return folders[name];
+            for (var f = 1; f <= P.numItems; f++) if (P.item(f) instanceof FolderItem && P.item(f).name === name && P.item(f).parentFolder === P.rootFolder) return (folders[name] = P.item(f));
+            return (folders[name] = P.items.addFolder(name));
+        }
+        for (i = 1; i <= P.numItems; i++) if (P.item(i).parentFolder === P.rootFolder && !(P.item(i) instanceof FolderItem)) items.push(P.item(i));
+        for (i = 0; i < items.length; i++) {
+            var it = items[i], name = null, ext = it.file ? (/\.([^.]+)$/.exec(it.file.name) || [0, ""])[1].toLowerCase() : "";
+            if (it instanceof CompItem) name = it.usedIn && it.usedIn.length ? "Прекомпы" : "Композиции";
+            else if (it.mainSource && it.mainSource instanceof SolidSource) name = "Солиды";
+            else if (/^(mp4|mov|avi|mkv|webm|m4v|mxf|mts|r3d|braw)$/.test(ext)) name = "Видео";
+            else if (/^(wav|mp3|aac|m4a|aif|aiff|flac|ogg)$/.test(ext)) name = "Аудио";
+            else if (/^(png|jpe?g|psd|ai|tiff?|gif|bmp|exr|webp|svg|heic|eps|pdf)$/.test(ext)) name = "Картинки";
+            else if (it.file) name = "Прочее";
+            if (name) { it.parentFolder = bin(name); n++; }
+        }
+        return n;
+    }
+    // take off what Caption AE put on these layers: shake, hit, punch zoom, its glow / sweep, bounce
+    function clearCaeFx(layers) {
+        var n = 0, i, k;
+        for (i = 0; i < layers.length; i++) {
+            var fx = layers[i].property("ADBE Effect Parade");
+            for (k = fx.numProperties; k >= 1; k--) {
+                var nm = fx.property(k).name;
+                if (/^(Shake\d* |Hit\d* |CAE |Bounce )/.test(nm) || nm === "Punch zoom") { fx.property(k).remove(); n++; }
+            }
+            n += clearBounce(layers[i]);
+        }
+        return n;
+    }
+    function clearBounce(group) {
+        var n = 0, i;
+        for (i = 1; i <= group.numProperties; i++) {
+            var p = group.property(i);
+            if (p.propertyType === PropertyType.PROPERTY) { if (p.canSetExpression && String(p.expression).indexOf(BOUNCE_TAG) === 0) { p.expression = ""; n++; } }
+            else n += clearBounce(p);
+        }
+        return n;
+    }
+
     var API = { trim: trim, parseDict: parseDict, applyDict: applyDict, applyDictText: applyDictText, srtText: srtText, sfxPlan: sfxPlan, parseJSONWords: parseJSONWords, parseSRT: parseSRT, groupPhrases: groupPhrases,
         phrasesToText: phrasesToText, textToPhrases: textToPhrases, pickStyles: pickStyles, revealExpr: revealExpr,
         highlightExpr: highlightExpr, accentExpr: accentExpr, wrapLine: wrapLine, STYLES: STYLES,
         pickExits: pickExits, shakeExpr: shakeExpr, punchExpr: punchExpr, typoPlan: typoPlan, typoLayout: typoLayout, heroExpr: heroExpr,
         buildSubs: buildSubs, shakeFrame: shakeFrame, addHookTitle: addHookTitle, addPunchZoom: addPunchZoom,
-        accentMoments: accentMoments, punchZoomExpr: punchZoomExpr, addShake: addShake, addPunch: addPunch, addGlow: addGlow, addSweep: addSweep, autoAccents: autoAccents, phraseInfo: phraseInfo, shatterMoveExpr: shatterMoveExpr, shatterFadeExpr: shatterFadeExpr, wordExitExpr: wordExitExpr, EXITS: EXITS };
+        accentMoments: accentMoments, punchZoomExpr: punchZoomExpr, addShake: addShake, addPunch: addPunch, addGlow: addGlow, addSweep: addSweep, autoAccents: autoAccents, phraseInfo: phraseInfo, shatterMoveExpr: shatterMoveExpr, shatterFadeExpr: shatterFadeExpr, wordExitExpr: wordExitExpr, EXITS: EXITS,
+        parseJSON: parseJSON, stripPunct: stripPunct, cleanPhrase: cleanPhrase, removeSubs: removeSubs, recolorSubs: recolorSubs, getCtrl: getCtrl,
+        soundFiles: soundFiles, addSfx: addSfx, moveAnchor: moveAnchor, alignLayers: alignLayers, nullParent: nullParent, addAdjustment: addAdjustment,
+        addBounce: addBounce, copyEase: copyEase, pasteEase: pasteEase, addCounter: addCounter, splitText: splitText, organizeProject: organizeProject,
+        clearCaeFx: clearCaeFx, STYLE_KEYS: STYLE_KEYS, EXIT_KEYS: EXIT_KEYS, SHAKES: SHAKES, SHAKE_KEYS: SHAKE_KEYS, PUNCHES: PUNCHES, PUNCH_KEYS: PUNCH_KEYS,
+        RHYTHM: RHYTHM, POWER: POWER, TAG: TAG, CTRL: CTRL, find: find };
     if (typeof module !== "undefined" && module.exports) { module.exports = API; return; }
+    // the CEP panel (cep/host/host.jsx) loads this file as its engine: functions only, no ScriptUI window
+    if (typeof $ !== "undefined" && $.global && $.global.CAPTIONAE_HOST) { $.global.CaptionAE = API; return; }
 
     // ---------- UI ----------
     var SEC = "CaptionAE", words = [], offset = 0, srcLayerName = "", srcName = ""; // srcName: for the SRT file name
@@ -1513,39 +1796,6 @@
         if (!words.length || !trim(editor.text)) { alert("Сначала распознайте речь или импортируйте субтитры."); return; }
         saveSrt(textToPhrases(editor.text, words), { hold: 0.4, noPunct: cNoPunct.value, keepQE: cKeepQE.value });
     };
-
-    var WHOOSH_LEAD = 0.18; // the bundled whooshes peak 0.18 s in (sounds/make_sounds.py): the peak lands on the phrase
-    function soundFiles(dir) {
-        var f = Folder(dir), a;
-        if (!f.exists) return [];
-        a = f.getFiles(function (x) { return x instanceof File && /\.(wav|mp3|aiff?|m4a)$/i.test(x.name); });
-        a.sort(function (x, y) { return x.name < y.name ? -1 : 1; });
-        return a;
-    }
-    function importOnce(file) {
-        var i, it, bin = null;
-        for (i = 1; i <= app.project.numItems; i++) {
-            it = app.project.item(i);
-            if (it instanceof FootageItem && it.file && it.file.fsName === file.fsName) return it;
-            if (it instanceof FolderItem && it.name === "Caption AE — звуки") bin = it;
-        }
-        it = app.project.importFile(new ImportOptions(file));
-        it.parentFolder = bin || app.project.items.addFolder("Caption AE — звуки");
-        return it;
-    }
-    // sound layers sit under everything, tagged like the captions: «Удалить» and a rebuild replace them too
-    function addSfx(comp, plan, F, db) {
-        var used = { whoosh: 0, hit: 0 }, made = 0, i;
-        for (i = 0; i < plan.length; i++) {
-            var list = F[plan[i].kind]; if (!list.length) continue;
-            var L = comp.layers.add(importOnce(list[used[plan[i].kind]++ % list.length])); // variants take turns
-            L.startTime = plan[i].t - (plan[i].kind === "whoosh" ? WHOOSH_LEAD : 0);
-            L.name = "SFX " + plan[i].kind; L.comment = TAG;
-            L.property("ADBE Audio Group").property("ADBE Audio Levels").setValue([db, db]);
-            L.moveToEnd(); made++;
-        }
-        return made;
-    }
 
     function regroup() {
         if (!words.length) return;

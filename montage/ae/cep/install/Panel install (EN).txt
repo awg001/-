@@ -1,0 +1,16 @@
+CAPTION AE — TABBED PANEL (CEP)
+
+The same Caption AE as a modern panel: tabs on top (Captions · Plain · Effects · Tools · ⚙) and a new Tools tab
+(anchor point, align, null parent, bounce, copy/paste easing, split text, counter, organise project). AE 2020+.
+
+INSTALL — pick one
+A) Windows: unzip everything → double-click install_panel_windows.bat
+   Mac: unzip → right-click install_panel_mac.command → Open → Open
+B) With a ZXP installer (aescripts ZXP Installer, Anastasiy's Extension Manager): drop CaptionAE.zxp onto it.
+
+Restart After Effects: Window → Extensions → Caption AE.
+
+SPEECH RECOGNITION needs Python 3.9–3.13 (python.org; on Windows tick "Add python.exe to PATH").
+In the panel: ⚙ → "Проверить" (check), then "Установить распознавание" (install) — 1–3 minutes, internet needed.
+
+The old panel (CaptionAE.jsx in ScriptUI Panels) keeps working; you can keep both.

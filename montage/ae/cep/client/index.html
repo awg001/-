@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caption AE</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header id="top">
+  <div id="brand"><span id="logo">C</span><b>Caption AE</b><small id="ver">v1.0</small></div>
+  <nav id="tabs">
+    <button class="tab on" data-tab="subs" title="Анимированные субтитры">Субтитры</button>
+    <button class="tab" data-tab="plain" title="Субтитры без анимации">Простые</button>
+    <button class="tab" data-tab="fx" title="Тряска, акценты, свет, заголовок-хук">Эффекты</button>
+    <button class="tab" data-tab="tools" title="Помощники монтажёра">Инструменты</button>
+    <button class="tab gear" data-tab="set" title="Настройки: распознавание, словарь, звуки" aria-label="Настройки">⚙</button>
+  </nav>
+</header>
+
+<main>
+<!-- ============ СУБТИТРЫ ============ -->
+<section class="page on" id="p-subs">
+  <div class="card">
+    <h3>Текст</h3>
+    <div class="row">
+      <button class="btn" data-act="recognize" id="b-rec">Распознать речь слоя</button>
+      <button class="btn ghost" data-act="import">Импорт SRT / JSON</button>
+    </div>
+    <textarea id="editor" spellcheck="false" placeholder="Выделите слой с голосом и нажмите «Распознать речь слоя» — или импортируйте SRT.&#10;&#10;Строка = фраза. Enter делит фразу, *слово* = акцент."></textarea>
+    <div class="hint" id="wordinfo">Строка = фраза · *слово* = акцент</div>
+    <div class="row">
+      <button class="btn ghost sm" data-act="dict" title="Слова, которые распознавание пишет неправильно">Словарь</button>
+      <button class="btn ghost sm" data-act="srt" title="Файл субтитров для YouTube, TikTok, Premiere">Экспорт SRT</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3>Пресет</h3>
+    <div class="chips" id="presets"></div>
+    <div class="row">
+      <button class="btn primary grow" data-act="build">Создать субтитры</button>
+      <button class="btn ghost" data-act="remove" title="Удалить субтитры Caption AE из композиции">Удалить</button>
+    </div>
+  </div>
+
+  <details class="sec" data-sec="split">
+    <summary>Разбивка на фразы</summary>
+    <div class="fields">
+      <label class="f wide"><span>Показ</span><select id="display"></select></label>
+    </div>
+    <div class="fields">
+      <label class="f"><span>Слов во фразе</span><input id="maxWords" type="number" min="1" max="12"></label>
+      <label class="f"><span>Букв в строке</span><input id="maxChars" type="number" min="4" max="80"></label>
+      <button class="btn ghost sm self-end" data-act="regroup" title="Разбить текст заново по этим числам (правки в тексте пропадут)">Разбить заново</button>
+    </div>
+    <div class="cks"><label class="ck"><input type="checkbox" id="noPunct"> Без знаков препинания</label><label class="ck"><input type="checkbox" id="keepQE"> Оставить ? и !</label></div>
+  </details>
+
+  <details class="sec" data-sec="anim">
+    <summary>Анимация</summary>
+    <div class="sub">Появление</div>
+    <div class="cards" id="styles"></div>
+    <div class="fields"><label class="f wide"><span>Уход</span><select id="exit"></select></label></div>
+    <div id="mixbox" class="box">
+      <div class="sub">Что разрешено «Миксу»</div>
+      <div class="cks" id="mixIn"></div>
+      <div class="cks" id="mixOut"></div>
+      <div class="inl"><label class="ck"><input type="checkbox" id="smart"> Умный подбор</label>
+        <label class="ck" title="Слово громче обычного на столько дБ становится акцентом"><input type="checkbox" id="voice"> Акценты по голосу, дБ</label><input id="thr" type="number" class="n2"></div>
+    </div>
+    <div class="cks"><label class="ck"><input type="checkbox" id="hotHit"> Толчок на акцентах</label>
+      <label class="ck" title="Приближение видео на акцентах (как у Jatho)"><input type="checkbox" id="zoom"> Панч-зум видео</label></div>
+    <div class="fields">
+      <label class="f"><span>Панч-зум, %</span><input id="zoomAmt" type="number"></label>
+      <label class="f"><span>Как</span><select id="zoomKind"><option value="0">скачком</option><option value="1">плавно</option></select></label>
+    </div>
+  </details>
+
+  <details class="sec" data-sec="look">
+    <summary>Шрифт и цвет</summary>
+    <div class="fields"><label class="f wide"><span>Шрифт (PostScript-имя)</span><input id="font" title="Например Montserrat-ExtraBold"></label></div>
+    <div class="fields">
+      <label class="f"><span>Размер</span><input id="size" type="number"></label>
+      <label class="f"><span>Высота, %</span><input id="posY" type="number" title="0 — верх кадра, 100 — низ"></label>
+      <label class="f"><span>Акцент, %</span><input id="accS" type="number" title="Насколько акцентное слово крупнее"></label>
+    </div>
+    <div class="row colors">
+      <label class="ck" title="Текст"><input type="color" id="txt"> текст</label>
+      <label class="ck" title="Акцентное слово"><input type="color" id="acc"> акцент</label>
+      <label class="ck" title="Слово, которое звучит (караоке)"><input type="color" id="hl"> караоке</label>
+      <button class="btn ghost sm" data-act="recolor" title="Новые цвета — всем субтитрам Caption AE в композиции">Перекрасить готовые</button>
+    </div>
+    <div class="cks"><label class="ck"><input type="checkbox" id="kara"> Караоке</label><label class="ck"><input type="checkbox" id="upper"> КАПС</label><label class="ck"><input type="checkbox" id="stroke"> Обводка</label><label class="ck"><input type="checkbox" id="shadow"> Тень</label><label class="ck"><input type="checkbox" id="mblur"> Motion blur</label></div>
+  </details>
+
+  <details class="sec" data-sec="typo">
+    <summary>Типографика и свет</summary>
+    <div class="fields"><label class="f wide"><span>Крупное слово</span><select id="typo" title="Крупное = акцент *…* или самое длинное слово. Разные шрифты в фразе — AE 2024+"></select></label></div>
+    <div class="fields"><label class="f wide"><span>Шрифт крупного слова</span><input id="font2"></label></div>
+    <div class="fields">
+      <label class="f"><span>Крупное, %</span><input id="bigPct" type="number"></label>
+      <label class="f"><span>Мелкие слова, %</span><input id="smallPct" type="number"></label>
+    </div>
+    <div class="cks"><label class="ck"><input type="checkbox" id="heroUp"> Крупное КАПСОМ</label><label class="ck"><input type="checkbox" id="heroFly"> Влёт 160%</label></div>
+    <div class="fields">
+      <label class="f"><span>Свечение</span><select id="glow"></select></label>
+      <label class="f"><span>Блик</span><select id="sweep"></select></label>
+    </div>
+  </details>
+
+  <details class="sec" data-sec="sound">
+    <summary>Звук</summary>
+    <div class="fields">
+      <label class="f"><span>Whoosh на фразы</span><select id="sfxPh"></select></label>
+      <label class="f"><span>Громкость, дБ</span><input id="sfxDb" type="number"></label>
+    </div>
+    <div class="cks"><label class="ck"><input type="checkbox" id="sfxHit"> Удар на акцентах</label></div>
+    <p class="hint">Папка звуков — во вкладке «Настройки».</p>
+  </details>
+</section>
+
+<!-- ============ ПРОСТЫЕ ============ -->
+<section class="page" id="p-plain">
+  <div class="card">
+    <h3>Текст — без анимации</h3>
+    <div class="row wrap">
+      <button class="btn" data-act="recognize">Распознать речь слоя</button>
+      <button class="btn ghost" data-act="import">Импорт SRT / JSON</button>
+      <button class="btn ghost" data-act="dict">Словарь</button>
+    </div>
+    <textarea id="pEdit" spellcheck="false" placeholder="Строка = один субтитр. Исправляйте слова прямо здесь — при смене «Слов в строке» правки сохранятся."></textarea>
+    <span class="hint" id="pInfo">Текст: ещё не загружен</span>
+  </div>
+  <div class="card">
+    <h3>Разбивка и время</h3>
+    <div class="fields">
+      <label class="f"><span>Слов в строке</span><select id="pN"></select></label>
+      <label class="f"><span>Строк</span><select id="pLines"><option>1</option><option>2</option></select></label>
+      <label class="f"><span>Интервал, %</span><input id="pLead" type="number" title="Межстрочный интервал для двух строк"></label>
+    </div>
+    <div class="cks"><label class="ck" title="Без галочки — строго по N слов"><input type="checkbox" id="pBreak"> Рвать на точках и паузах</label></div>
+    <div class="fields"><label class="f wide"><span>Длительность</span><select id="pDurMode"><option value="0">по речи — до следующих слов</option><option value="1">фиксированная</option></select></label></div>
+    <div class="fields">
+      <label class="f"><span>Фиксированная, с</span><input id="pDur" type="number" step="0.1"></label>
+      <label class="f"><span>По речи: держать, с</span><input id="pHold" type="number" step="0.1" title="Сколько держать субтитр после последнего слова"></label>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Вид</h3>
+    <div class="fields"><label class="f wide"><span>Шрифт (PostScript-имя)</span><input id="pFont"></label></div>
+    <div class="fields">
+      <label class="f"><span>Размер</span><input id="pSize" type="number"></label>
+      <label class="f"><span>Высота, %</span><input id="pY" type="number"></label>
+      <label class="f"><span>Цвет</span><input type="color" id="pCol"></label>
+    </div>
+    <div class="cks"><label class="ck"><input type="checkbox" id="pUp"> КАПС</label><label class="ck"><input type="checkbox" id="pSh"> Мягкая тень</label></div>
+    <div class="cks"><label class="ck"><input type="checkbox" id="pNoP"> Без знаков препинания</label><label class="ck"><input type="checkbox" id="pQE"> Оставить ? и !</label></div>
+  </div>
+  <div class="row">
+    <button class="btn primary grow" data-act="pbuild" title="Заменяет прежние субтитры Caption AE (вернуть — Ctrl+Z)">Создать субтитры</button>
+    <button class="btn ghost" data-act="remove">Удалить</button>
+    <button class="btn ghost" data-act="psrt">Экспорт SRT</button>
+  </div>
+</section>
+
+<!-- ============ ЭФФЕКТЫ ============ -->
+<section class="page" id="p-fx">
+  <div class="card">
+    <h3>Тряска</h3>
+    <div class="fields">
+      <label class="f"><span>Тип</span><select id="shKind"></select></label>
+      <label class="f"><span>Что трясти</span><select id="shTarget"><option value="frame">весь кадр</option><option value="layers">выделенные слои</option></select></label>
+    </div>
+    <div class="fields">
+      <label class="f"><span>Ритм</span><select id="shRh"></select></label>
+      <label class="f"><span>Частота, Гц</span><input id="shFreq" type="number"></label>
+    </div>
+    <div class="fields"><label class="f wide"><span>Сила — заполняет поля ниже</span><select id="shPow"></select></label></div>
+    <div class="fields">
+      <label class="f"><span>Сдвиг, px</span><input id="shPx" type="number"></label>
+      <label class="f"><span>Поворот, °</span><input id="shRot" type="number" step="0.1"></label>
+      <label class="f"><span>Зум, %</span><input id="shZoom" type="number" step="0.5"></label>
+    </div>
+    <div class="fields">
+      <label class="f"><span>Длительность, с</span><input id="shDur" type="number" step="0.1"></label>
+      <label class="f"><span>Резкость 1–4</span><input id="shSharp" type="number" min="1" max="4"></label>
+    </div>
+    <div class="cks"><label class="ck"><input type="checkbox" id="shBlur"> Размытие в движении</label><label class="ck"><input type="checkbox" id="shKeep"> Субтитры не трясти</label></div>
+    <button class="btn primary" data-act="shake">Добавить тряску с текущего кадра</button>
+  </div>
+  <div class="card">
+    <h3>Акцент на выделенных слоях</h3>
+    <div class="fields"><label class="f wide"><span>Эффект</span><select id="hKind"></select></label></div>
+    <div class="fields">
+      <label class="f"><span>Сила</span><select id="hPow"><option value="0">Мягко</option><option value="1">Средне</option><option value="2">Сильно</option></select></label>
+      <label class="f"><span>Длительность ×</span><input id="hDur" type="number" step="0.1"></label>
+    </div>
+    <div class="fields"><label class="f wide"><span>Когда</span><select id="hWhen"><option value="0">с текущего кадра</option><option value="1">с начала каждого слоя</option></select></label></div>
+    <div class="cks"><label class="ck"><input type="checkbox" id="hShake"> + резкая тряска</label><label class="ck"><input type="checkbox" id="hBlur"> Размытие в движении</label></div>
+    <div class="row">
+      <button class="btn primary" data-act="hit">Применить к выделенным</button>
+      <button class="btn ghost" data-act="glow">Свечение</button>
+      <button class="btn ghost" data-act="sweep">Блик</button>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Заголовок-хук</h3>
+    <div class="fields"><label class="f wide"><span>Строка 1 — белая</span><input id="hk1"></label></div>
+    <div class="fields"><label class="f wide"><span>Строка 2 — цветная</span><input id="hk2"></label></div>
+    <div class="fields">
+      <label class="f"><span>Цвет</span><select id="hkCol"></select></label>
+      <label class="f"><span>Длительность, с</span><input id="hkDur" type="number" step="0.1"></label>
+      <label class="f"><span>Высота, %</span><input id="hkY" type="number"></label>
+    </div>
+    <div class="cks"><label class="ck"><input type="checkbox" id="hkGlow"> Свечение цветной строки</label></div>
+    <button class="btn primary" data-act="hook">Добавить заголовок с текущего кадра</button>
+  </div>
+</section>
+
+<!-- ============ ИНСТРУМЕНТЫ ============ -->
+<section class="page" id="p-tools">
+  <div class="card">
+    <h3>Точка привязки и выравнивание</h3>
+    <div class="row top">
+      <div class="anchor" id="anchorGrid" title="Перенести точку привязки, слой остаётся на месте"></div>
+      <div class="aligns">
+        <div class="row tight">
+          <button class="ic" data-align="left" title="По левому краю">⇤</button><button class="ic" data-align="hcenter" title="По центру по горизонтали">↔</button><button class="ic" data-align="right" title="По правому краю">⇥</button>
+        </div>
+        <div class="row tight">
+          <button class="ic" data-align="top" title="По верху">⤒</button><button class="ic" data-align="vcenter" title="По центру по вертикали">↕</button><button class="ic" data-align="bottom" title="По низу">⤓</button>
+        </div>
+        <label class="ck"><input type="checkbox" id="alignSel"> к выделению, а не к кадру</label>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Слои и ключи</h3>
+    <div class="row wrap">
+      <button class="btn ghost" data-act="null" title="Нуль в центре выделения, выделенные слои становятся его детьми">Нуль-родитель</button>
+      <button class="btn ghost" data-act="adjustment" title="Корректирующий слой над выделенными, по их длине">Корректирующий слой</button>
+      <button class="btn ghost" data-act="bounce" title="Отскок после ключей выделенных свойств. Сила — ползунки Bounce на слое">Bounce на ключах</button>
+      <button class="btn ghost" data-act="copyEase" title="Копировать сглаживание выделенного ключа">Копировать сглаживание</button>
+      <button class="btn ghost" data-act="pasteEase" title="Вставить на выделенные ключи">Вставить сглаживание</button>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Текст</h3>
+    <div class="row">
+      <button class="btn ghost" data-act="splitWords" title="Каждое слово — отдельный слой на своём месте">Разбить на слова</button>
+      <button class="btn ghost" data-act="splitLines" title="Каждая строка — отдельный слой на своём месте">Разбить на строки</button>
+    </div>
+    <div class="sub">Счётчик чисел</div>
+    <div class="fields">
+      <label class="f"><span>От</span><input id="cFrom" type="number"></label>
+      <label class="f"><span>До</span><input id="cTo" type="number"></label>
+      <label class="f"><span>За, с</span><input id="cDur" type="number" step="0.1"></label>
+    </div>
+    <div class="fields">
+      <label class="f"><span>Перед числом</span><input id="cPre" placeholder="$"></label>
+      <label class="f"><span>После</span><input id="cSuf" placeholder=" млн"></label>
+      <label class="f"><span>Знаков после ,</span><input id="cDec" type="number" min="0" max="5"></label>
+    </div>
+    <button class="btn ghost" data-act="counter">Добавить счётчик с текущего кадра</button>
+  </div>
+  <div class="card">
+    <h3>Проект</h3>
+    <div class="row wrap">
+      <button class="btn ghost" data-act="organize" title="Видео, аудио, картинки, композиции, прекомпы — по папкам">Разложить по папкам</button>
+      <button class="btn ghost" data-act="purge" title="Edit › Purge › All Memory: освобождает память">Очистить память</button>
+      <button class="btn ghost danger" data-act="clearFx" title="Снять с выделенных слоёв тряску, удары, панч-зум, свечение, блик и bounce Caption AE. Ваши эффекты не трогает">Снять эффекты Caption AE</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ НАСТРОЙКИ ============ -->
+<section class="page" id="p-set">
+  <div class="card">
+    <h3>Распознавание</h3>
+    <div class="grid">
+      <label>Язык</label><select id="lang"><option>ru</option><option>en</option><option>auto</option></select>
+      <label>Модель</label><select id="model" title="small — быстро. medium / large-v3 — точнее, но дольше; в первый раз скачиваются 1,5 / 3 ГБ"><option>small</option><option>medium</option><option>large-v3</option></select>
+      <label>Python</label><input id="python" title="Python, в котором установлено распознавание">
+    </div>
+    <div class="row">
+      <button class="btn ghost" data-act="checkPy">Проверить</button>
+      <button class="btn ghost" data-act="installRec">Установить распознавание</button>
+    </div>
+  </div>
+  <div class="card">
+    <h3>Словарь замен</h3>
+    <textarea id="dict" class="short" spellcheck="false" placeholder="как распознало = как надо&#10;зелим хан = Зелимхан"></textarea>
+    <div class="row between"><span class="hint">Регистр и ё не важны. Исправляет каждый новый текст.</span><button class="btn ghost sm" data-act="dictSave">Сохранить и исправить</button></div>
+  </div>
+  <div class="card">
+    <h3>Звуки</h3>
+    <div class="grid">
+      <label>Папка</label><span class="inl grow"><input id="sfxDir" class="grow" title="Подпапки whoosh и hit с WAV/MP3"><button class="btn ghost sm" data-act="sfxPick">…</button></span>
+    </div>
+  </div>
+  <div class="card about">
+    <b>Caption AE</b> <span id="aboutVer"></span><br>
+    <span class="hint">Субтитры, тряска, акценты и помощники монтажёра для After Effects. Всё работает у вас на компьютере, бесплатно.</span>
+  </div>
+</section>
+</main>
+
+<footer>
+  <div id="bar"><i id="barFill"></i></div>
+  <div id="status">Готово</div>
+</footer>
+
+<div id="modal" class="hidden"><div class="mbox"><p id="mtext"></p><div class="row end"><button class="btn ghost" id="mno">Отмена</button><button class="btn primary" id="myes">Да</button></div></div></div>
+
+<script src="cep.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
