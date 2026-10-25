@@ -491,7 +491,8 @@
 
             var tr = layer.property("ADBE Transform Group");
             // center on the fully revealed line, measured before the exit starts scattering it
-            tr.property("ADBE Anchor Point").expression = "var r=sourceRectAtTime(Math.max(inPoint,outPoint-" + D + "-thisComp.frameDuration),false);[r.left+r.width/2,r.top+r.height/2]";
+            // the layer's own Anchor Point value is added on top, so it can still be nudged by hand
+            tr.property("ADBE Anchor Point").expression = "var r=sourceRectAtTime(Math.max(inPoint,outPoint-" + D + "-thisComp.frameDuration),false);add([r.left+r.width/2,r.top+r.height/2],value)";
             tr.property("ADBE Position").setValue([comp.width / 2, comp.height * opt.posY]);
             tr.property("ADBE Position").expression = ctrlPosExpr;
             tr.property("ADBE Scale").setValue([fit, fit]);
@@ -689,11 +690,11 @@
             // o.y is the seam between the lines: line 1 sits above it, line 2 below, 12 px apart
             if (k === 0) y -= h / 2 + 6; else if (made.length) y += 6 + h / 2;
             var tr = L.property("ADBE Transform Group");
-            tr.property("ADBE Anchor Point").expression = "var r=sourceRectAtTime(inPoint,false);[r.left+r.width/2,r.top+r.height/2]";
+            tr.property("ADBE Anchor Point").expression = "var r=sourceRectAtTime(inPoint,false);add([r.left+r.width/2,r.top+r.height/2],value)";
             tr.property("ADBE Position").setValue([comp.width / 2, y]);
             tr.property("ADBE Scale").setValue([sc, sc]);
             tr.property("ADBE Scale").expression = popInScale(L.inPoint, S.from, S.d, S.c);
-            tr.property("ADBE Opacity").expression = "linear(time,inPoint,inPoint+" + (4 * fr) + ",0,100)";
+            tr.property("ADBE Opacity").expression = "value*linear(time,inPoint,inPoint+" + (4 * fr) + ",0,1)"; // the layer's Opacity still counts
             softShadow(L, 120);
             if (k === 1 && o.glow) {
                 var g = L.property("ADBE Effect Parade").addProperty("ADBE Glo2");
@@ -706,7 +707,7 @@
     }
 
     // size and height of all captions from CAPTION_CTRL; without the null the layer simply keeps its own values
-    var ctrlPosExpr = 'try{value+[0,thisComp.layer("' + CTRL + '").effect("Y offset")(1)]}catch(e){value}';
+    var ctrlPosExpr = 'try{add(value,[0,thisComp.layer("' + CTRL + '").effect("Y offset")(1)])}catch(e){value}';
     var ctrlScaleExpr = 'try{var s=thisComp.layer("' + CTRL + '").effect("Size %")(1)/100;[value[0]*s,value[1]*s]}catch(e){value}';
 
     // Recolour captions already in the comp, also ones made by older versions: the text's own fill = text colour,
@@ -733,6 +734,9 @@
             }
             var tr = L.property("ADBE Transform Group");
             if (/^value\+\[0,/.test(tr.property("ADBE Position").expression)) tr.property("ADBE Position").expression = ctrlPosExpr;
+            var apx = tr.property("ADBE Anchor Point").expression; // older versions ignored the layer's own anchor
+            if (/^var r=sourceRectAtTime/.test(apx) && !/add\(/.test(apx))
+                tr.property("ADBE Anchor Point").expression = apx.replace(/\[r\.left\+r\.width\/2,r\.top\+r\.height\/2\]$/, "add([r.left+r.width/2,r.top+r.height/2],value)");
             if (/^var s=/.test(tr.property("ADBE Scale").expression)) tr.property("ADBE Scale").expression = ctrlScaleExpr;
             n++;
         }
