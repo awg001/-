@@ -42,7 +42,7 @@ HOW TO USE
 6. «Словарь замен…» (Replacement dictionary) — list the words recognition gets wrong once
    (as recognised = correct, e.g. zelim han = Zelimkhan); every new text is fixed automatically.
 7. «Экспорт SRT» (Export SRT) — a subtitle file for YouTube, TikTok, Premiere.
-8. Sound: «Настройки ▸» (Settings) → «Звук» (Sound) — whoosh as captions appear, hit on accents.
+8. Sound: the «Звук» (Sound) section — whoosh as captions appear, hit on accents.
    Your own sounds: a folder with whoosh and hit subfolders (WAV/MP3).
 (The panel interface is in Russian; this guide gives the English meaning of each button.)
 

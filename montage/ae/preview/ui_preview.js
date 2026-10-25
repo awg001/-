@@ -29,7 +29,7 @@ const ES3 = `(function (o, ks) { for (var i = 0; i < ks.length; i++) delete o[ks
 delete Array.isArray; delete Object.keys; delete Object.create; delete Object.assign; delete Function.prototype.bind; delete Date.now; delete this.JSON;`;
 module.exports = { ES3 };
 const settings = {};
-if (process.env.OPEN) settings["CaptionAEsetOpen"] = "1"; // render with «Настройки» unfolded
+if (process.env.OPEN) settings["CaptionAEopenSec"] = process.env.OPEN; // OPEN=n: render with settings section n unfolded
 const sandbox = {
     Window, Panel, SHOWN,
     app: {
@@ -52,17 +52,20 @@ const win = sandbox.SHOWN[0];
 
 // ---------- HTML in After Effects' panel style ----------
 const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;");
+// fixed widths (label column, checkbox grid) and fill-width buttons, as the ScriptUI code sets them
+const w = c => c.preferredSize && c.preferredSize.width > 0 ? ` style="width:${c.preferredSize.width}px;flex:none"` : "";
+const fill = c => Array.isArray(c.alignment) && c.alignment[0] === "fill";
 function html(c) {
     if (c.visible === false) return ""; // folded / hidden controls take no room, as in AE
     const kids = () => c.children.map(html).join("");
     switch (c.type) {
         case "group": return `<div class="g ${c.orientation}">${kids()}</div>`;
         case "panel": return `<fieldset class="p"><legend>${esc(c.text)}</legend>${kids()}</fieldset>`;
-        case "statictext": return `<span class="st">${esc(c.text).replace(/\n/g, "<br>")}</span>`;
+        case "statictext": return `<span class="st"${w(c)}>${esc(c.text).replace(/\n/g, "<br>")}</span>`;
         case "edittext": return c.props.multiline ? `<textarea rows="9">${esc(c.text)}</textarea>`
             : `<input value="${esc(c.text)}" style="width:${(c.characters || 10) * 8 + 10}px">`;
-        case "button": return `<button>${esc(c.text)}</button>`;
-        case "checkbox": return `<label class="cb"><span class="box">${c.value ? "✓" : ""}</span>${esc(c.text)}</label>`;
+        case "button": return `<button${fill(c) ? ' class="fill"' : ""}${w(c)}>${esc(c.text)}</button>`;
+        case "checkbox": return `<label class="cb${c.enabled === false ? " off" : ""}"${w(c)}><span class="box">${c.value ? "✓" : ""}</span>${esc(c.text)}</label>`;
         case "dropdownlist": return `<span class="dd">${esc(c.selection ? c.selection.text : "")}<i>▾</i></span>`;
         default: return kids();
     }
@@ -79,6 +82,7 @@ input,textarea{background:#191919;border:1px solid #474747;color:#e6e6e6;font:in
 textarea{width:420px;resize:none}button{background:#3a3a3a;border:1px solid #555;color:#eee;font:inherit;padding:4px 10px;border-radius:2px}
 .cb{display:flex;align-items:center;gap:5px}.box{width:12px;height:12px;border:1px solid #666;background:#191919;display:inline-flex;align-items:center;justify-content:center;font-size:10px;color:#4aa3ff}
 .dd{background:#2b2b2b;border:1px solid #4a4a4a;padding:2px 6px;display:inline-flex;gap:10px;align-items:center;color:#e6e6e6}.dd i{color:#888;font-style:normal}
+button.fill{width:100%;text-align:left;background:#2e2e2e}.cb.off{opacity:.45}.st{white-space:nowrap}
 .status{padding:6px 10px;border-top:1px solid #3a3a3a;color:#9a9a9a}`;
 
 const out = process.argv[2] || "ui_out";
@@ -86,7 +90,7 @@ fs.mkdirSync(out, { recursive: true });
 const tp = findType(win, "tabbedpanel"), status = win.children.find(c => c.type === "statictext");
 tp.children.forEach((tab, i) => {
     const tabs = tp.children.map((t, j) => `<span class="tab${i === j ? " on" : ""}">${esc(t.text)}</span>`).join("");
-    fs.writeFileSync(path.join(out, `tab_${i + 1}${process.env.OPEN && i === 0 ? "_open" : ""}.html`), `<!doctype html><meta charset="utf-8"><style>${css}</style>
+    fs.writeFileSync(path.join(out, `tab_${i + 1}${process.env.OPEN && i === 0 ? "_open" + process.env.OPEN : ""}.html`), `<!doctype html><meta charset="utf-8"><style>${css}</style>
 <div class="win"><div class="title">${esc(win.text)}</div><div class="tabs">${tabs}</div><div class="body">${tab.children.map(html).join("")}</div>
 <div class="status">${esc(status ? status.text : "")}</div></div>`);
 });
