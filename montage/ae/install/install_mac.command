@@ -27,8 +27,8 @@ else
   [ -n "$ok" ] && printf "Ready / Готово:$ok\n"
   [ -n "$bad" ] && printf "Failed / Не установилось:$bad\n"
   echo
-  echo "In the Caption AE panel («Настройки ▸» → Python) use one of the Ready paths."
-  echo "В панели Caption AE («Настройки ▸» → поле Python) должен стоять один из путей «Готово»."
+  echo "In the Caption AE panel (section «Распознавание» → Python) use one of the Ready paths."
+  echo "В панели Caption AE (раздел «Распознавание» → поле Python) должен стоять один из путей «Готово»."
   echo "Easiest: just press «Распознать речь слоя» — the panel offers to install into its own Python."
   echo "Проще всего: нажмите «Распознать речь слоя» — панель сама предложит установить в свой Python."
 fi
