@@ -40,7 +40,7 @@ items.push({ name: "Black Solid", mainSource: new sandbox.SolidSource(), parentF
 const vid = comp.layers.addSolid([0, 0, 0], "talking_head.mp4", 1080, 1920);
 vid.source = { file: { fsName: "/media/монтаж/Sequence 01.mp4", exists: true } };
 comp.selectedLayers = [vid];
-sandbox.$ = { fileName: path.join(EXT, "host/host.jsx"), os: "Windows 10", global: {},
+sandbox.$ = { fileName: "", os: "Windows 10", global: {}, // empty fileName as in AE for a ScriptPath script: the panel hands the folder over
     evalFile: f => vm.runInContext(fs.readFileSync(f.fsName || String(f), "utf8").replace(/^﻿/, ""), sandbox) };
 sandbox.$.global = sandbox; sandbox.global = sandbox;
 vm.createContext(sandbox);
@@ -49,6 +49,9 @@ vm.runInContext(`(function (o, ks) { for (var i = 0; i < ks.length; i++) delete 
 (function (o, ks) { for (var i = 0; i < ks.length; i++) delete o[ks[i]]; })
     (String.prototype, ["trim", "trimStart", "trimEnd", "includes", "startsWith", "endsWith", "repeat", "padStart", "padEnd"]);
 delete Array.isArray; delete Object.keys; delete Object.create; delete Object.assign; delete Function.prototype.bind; delete this.JSON;`, sandbox);
+// AE runs the manifest's ScriptPath when the panel opens — with an empty $.fileName, so the engine is not loaded yet
+vm.runInContext(fs.readFileSync(path.join(EXT, "host/host.jsx"), "utf8"), sandbox);
+if (vm.runInContext("CK", sandbox) !== null) throw new Error("host.jsx loaded the engine without a folder");
 const calls = [];
 function aeEval(code) {
     try { const r = vm.runInContext(code, sandbox); if (/^cae\(/.test(code)) calls.push(code.slice(4, 30) + " → " + String(r).slice(0, 120)); return String(r); }

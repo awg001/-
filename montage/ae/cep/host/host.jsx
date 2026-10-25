@@ -1,10 +1,24 @@
 // Caption AE — the After Effects side of the CEP panel. The panel (client/app.js) calls cae("command", "<json>");
 // every command answers a JSON string {ok:true, ...} or {ok:false, error:"…"}. The work itself is done by the same
 // engine as the ScriptUI panel: CaptionAE.jsx, loaded here in host mode (functions only, no window).
-// The flag is cleared right away: the ScriptUI panel (CaptionAE.jsx in ScriptUI Panels) shares this engine and must still build its window.
-$.global.CAPTIONAE_HOST = true;
-try { $.evalFile(File(File($.fileName).parent.fsName + "/CaptionAE.jsx")); } finally { $.global.CAPTIONAE_HOST = false; }
-var CK = $.global.CaptionAE;
+var CK = null, CAE_LOAD_ERR = "";
+// Loads the engine from the extension folder. The panel passes the folder: in a script AE runs from the manifest's
+// ScriptPath, $.fileName can be empty. The flag is cleared right away: the ScriptUI panel (CaptionAE.jsx in ScriptUI
+// Panels) shares this engine and must still build its window.
+function caeInit(root) {
+    if (CK) return "ok";
+    var f = File(root + "/host/CaptionAE.jsx");
+    if (!f.exists) return (CAE_LOAD_ERR = "Не найден движок панели: " + f.fsName + ". Переустановите Caption AE.");
+    $.global.CAPTIONAE_HOST = true;
+    try {
+        $.evalFile(f); CK = $.global.CaptionAE || null;
+        if (!CK) CAE_LOAD_ERR = "Движок панели не загрузился: " + f.fsName;
+    } catch (e) {
+        CAE_LOAD_ERR = "Движок панели не загрузился: " + e.message + " (строка " + e.line + ")";
+    } finally { $.global.CAPTIONAE_HOST = false; }
+    return CK ? "ok" : CAE_LOAD_ERR;
+}
+try { if ($.fileName) caeInit(File($.fileName).parent.parent.fsName); } catch (e) {}
 
 // ExtendScript has no JSON.stringify: a small one for the answers
 function caeJSON(v) {
@@ -191,6 +205,7 @@ var CAE = {
 
 function cae(cmd, json) {
     try {
+        if (!CK) throw new Error(CAE_LOAD_ERR || "Движок Caption AE не загружен — закройте и откройте панель.");
         if (!CAE[cmd]) throw new Error("Неизвестная команда: " + cmd);
         var r = CAE[cmd](json ? CK.parseJSON(json) : {});
         r = r || {}; r.ok = true;

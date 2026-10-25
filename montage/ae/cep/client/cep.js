@@ -18,10 +18,12 @@ var CEP = (function () {
         });
     }
     var hostLoaded = null;
-    function ensureHost() { // manifest ScriptPath loads host.jsx; if AE did not, load it ourselves once
-        if (!hostLoaded) hostLoaded = evalScript("typeof cae").then(function (t) {
-            if (t === "function") return;
-            return evalScript('$.evalFile(File("' + root.replace(/\\/g, "/") + '/host/host.jsx"))');
+    function ensureHost() { // manifest ScriptPath loads host.jsx; if AE did not, load it ourselves; then the engine, by our folder
+        var R = JSON.stringify(root.replace(/\\/g, "/"));
+        if (!hostLoaded) hostLoaded = evalScript("typeof caeInit").then(function (t) {
+            if (t !== "function") return evalScript("$.evalFile(File(" + R + ' + "/host/host.jsx"))');
+        }).then(function () { return evalScript("caeInit(" + R + ")"); }).then(function (r) {
+            if (r !== "ok") { hostLoaded = null; throw new Error(r && r !== "undefined" ? r : "After Effects не загрузил host.jsx панели. Переустановите Caption AE и перезапустите AE."); }
         });
         return hostLoaded;
     }
