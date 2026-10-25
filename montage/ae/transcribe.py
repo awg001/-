@@ -1,4 +1,5 @@
 """Speech → word timings for CaptionAE.jsx: python3 transcribe.py media.mp4 out.json [ru] [small] [progress.txt]
+Also: python3 transcribe.py --install <base> — installs faster-whisper into this very Python (see install()).
 
 The panel runs it in the background (After Effects stays responsive) and watches files next to out.json:
 progress.txt — "stage text|fraction" while working; progress.txt.cancel — created by the panel to stop;
@@ -110,7 +111,32 @@ def main(media, out, lang='ru', model='small', progress=None):
     print(f'{len(res)} words')
 
 
+def install(base):
+    """Install faster-whisper into THIS Python (the one the panel runs) — the panel's «Установить» button.
+    Tries a normal install, then --user, then --user --break-system-packages (Homebrew Python on Mac);
+    success = faster_whisper imports. Leaves base.done or base.failed; the log is base.log."""
+    import subprocess
+    log = open(base + '.log', 'w', encoding='utf8', buffering=1)
+    sys.stdout = sys.stderr = log
+    run = lambda c: subprocess.run(c, stdout=log, stderr=log).returncode == 0
+    print('Python:', sys.executable, sys.version)
+    if not run([sys.executable, '-m', 'pip', '--version']):
+        run([sys.executable, '-m', 'ensurepip', '--user'])
+    ok = False
+    for extra in ([], ['--user'], ['--user', '--break-system-packages']):
+        cmd = [sys.executable, '-m', 'pip', 'install', '--upgrade', '--disable-pip-version-check'] + extra + ['faster-whisper']
+        print('$', ' '.join(cmd))
+        if run(cmd) and run([sys.executable, '-c', 'import faster_whisper']):
+            ok = True
+            break
+    print('OK' if ok else 'FAILED')
+    open(base + ('.done' if ok else '.failed'), 'w').close()
+
+
 if __name__ == '__main__':
+    if len(sys.argv) > 2 and sys.argv[1] == '--install':
+        install(arg_path(sys.argv[2]))
+        sys.exit()
     args = sys.argv[1:6]
     out = arg_path(args[1]) if len(args) > 1 else None
     if out and len(args) > 4:  # background mode: everything goes to out.log, failure leaves out.failed

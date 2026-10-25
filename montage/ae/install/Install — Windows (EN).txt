@@ -55,4 +55,5 @@ TROUBLESHOOTING
   or type py into the Python field of the panel.
 • Asked to enable a permission → see Step 2.
 • Panel missing from the Window menu → make sure the file is inside "ScriptUI Panels" and restart AE.
+• "Recognition is not installed…" → click Yes: the panel installs it into the Python it uses (1–3 min).
 • Any other error → send a screenshot (the error box shows a line number).

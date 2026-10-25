@@ -1493,27 +1493,59 @@
         var py = File(scriptDir.fsName + "/transcribe.py");
         if (!py.exists) { alert("Рядом со скриптом нет transcribe.py:\n" + py.fsName); return; }
         setPref("python", ePy.text); setPref("model", ddModel.selection.text);
-        var q = function (s) { return '"' + s + '"'; };
-        var ver = String(system.callSystem(q(ePy.text) + " --version")); // seconds, not minutes: is Python there at all?
-        if (!/Python \d/.test(ver)) { alert(whyFailed(ver) + "\n\nПодробности:\n" + ver.slice(-400)); return; }
+        var q = qq;
+        // seconds, not minutes: is Python there, and does it have the recogniser? (Macs often have several Pythons)
+        var chk = String(system.callSystem(q(ePy.text) + ' -c "import sys;print(\'Python \'+sys.version.split()[0]+\' \'+sys.executable);import faster_whisper;print(\'FW_OK\')"'));
+        if (!/Python \d/.test(chk)) { alert(whyFailed(chk) + "\n\nПодробности:\n" + chk.slice(-400)); return; }
+        if (!/FW_OK/.test(chk)) { askInstall(chk); return; }
         // a separate file set per run, so a cancelled run finishing late cannot be mistaken for this one
         var id = new Date().getTime(), base = Folder.temp.fsName + "/captionae_" + id;
         var out = File(base + ".json"), prog = File(base + "_progress.txt");
         // file paths go as hex of their UTF-8 bytes: Windows' command line mangles non-Latin names ("A:\монтаж\...")
         var args = q(py.fsName) + " hex:" + hexUtf8(L.source.file.fsName) + " hex:" + hexUtf8(out.fsName) + " " +
             ddLang.selection.text + " " + ddModel.selection.text + " hex:" + hexUtf8(prog.fsName);
-        // in the background: After Effects stays usable; the panel polls the progress file (CaptionAE_poll below)
-        if ($.os.indexOf("Windows") >= 0) system.callSystem('cmd.exe /c start "Caption AE" /min ' + q(ePy.text) + " " + args);
-        else system.callSystem(q(ePy.text) + " " + args + " > /dev/null 2>&1 &");
-        job = { out: out, prog: prog, log: File(base + ".json.log"), failed: File(base + ".json.failed"), t0: new Date().getTime(),
+        launch(args);
+        job = { kind: "recognize", out: out, prog: prog, log: File(base + ".json.log"), failed: File(base + ".json.failed"), t0: new Date().getTime(),
             offset: L.startTime, name: L.name, model: ddModel.selection.text };
         bTrans.text = bPTrans.text = "Отменить распознавание";
         status.text = "Запускаю распознавание (" + job.model + ")… AE можно пользоваться.";
         job.task = app.scheduleTask("$.global.CaptionAE_poll()", 700, true);
     };
 
-    // ---------- background recognition: one job at a time, watched by a scheduled task ----------
+    // ---------- background recognition / installation: one job at a time, watched by a scheduled task ----------
     var job = null;
+    function qq(s) { return '"' + s + '"'; }
+    // run Python with these arguments in the background: After Effects stays usable; CaptionAE_poll watches the files
+    function launch(args) {
+        if ($.os.indexOf("Windows") >= 0) system.callSystem('cmd.exe /c start "Caption AE" /min ' + qq(ePy.text) + " " + args);
+        else system.callSystem(qq(ePy.text) + " " + args + " > /dev/null 2>&1 &");
+    }
+    // the recogniser is missing for the Python the panel uses: offer to install it there, from the panel
+    function askInstall(info) {
+        var m = /Python (\S+) (.+)/.exec(info), who = m ? "Python " + m[1] + "\n" + trim(m[2]) : ePy.text;
+        if (!confirm("Распознавание не установлено для Python, которым пользуется панель:\n" + who +
+            "\n\nУстановить сейчас? 1–3 минуты, нужен интернет. After Effects можно пользоваться.")) {
+            status.text = "Распознавание не установлено. Можно запустить install_windows.bat / install_mac.command из архива."; return;
+        }
+        var base = Folder.temp.fsName + "/captionae_install_" + new Date().getTime();
+        launch(qq(File(scriptDir.fsName + "/transcribe.py").fsName) + " --install hex:" + hexUtf8(base));
+        job = { kind: "install", done: File(base + ".done"), failed: File(base + ".failed"), log: File(base + ".log"), t0: new Date().getTime() };
+        bTrans.text = bPTrans.text = "Отменить распознавание";
+        status.text = "Устанавливаю распознавание…";
+        job.task = app.scheduleTask("$.global.CaptionAE_poll()", 1000, true);
+    }
+    function pollInstall() {
+        var secs = Math.round((new Date().getTime() - job.t0) / 1000);
+        if (job.done.exists) { endJob(); status.text = "Распознавание установлено. Нажмите «Распознать речь слоя»."; return; }
+        if (job.failed.exists || (!job.log.exists && secs > 40)) {
+            var j = endJob(), log = j.log.exists ? readFile(j.log) : "";
+            status.text = "Установить не удалось — см. сообщение.";
+            alert("Не удалось установить распознавание.\nНужен интернет и Python 3.9–3.13. " +
+                "Можно запустить install_windows.bat / install_mac.command из архива.\n\nПодробности (конец журнала):\n" + log.slice(-600));
+            return;
+        }
+        status.text = "Устанавливаю распознавание… " + secs + " с. AE можно пользоваться.";
+    }
     function endJob() {
         if (!job) return;
         try { app.cancelTask(job.task); } catch (e) {}
@@ -1523,6 +1555,7 @@
     }
     function cancelJob() {
         var j = endJob(); if (!j) return;
+        if (j.kind === "install") { status.text = "Больше не слежу за установкой (она может завершиться сама)."; return; }
         var c = File(j.prog.fsName + ".cancel"); c.open("w"); c.write("1"); c.close(); // transcribe.py stops at its next step
         status.text = "Распознавание отменено.";
     }
@@ -1534,6 +1567,7 @@
     $.global.CaptionAE_poll = function () {
         if (!job) return;
         try {
+            if (job.kind === "install") { pollInstall(); return; }
             if (job.out.exists) {
                 var j = endJob();
                 words = parseJSONWords(readFile(j.out));
@@ -1546,6 +1580,7 @@
             if (job.failed.exists) {
                 var jf = endJob(), log = jf.log.exists ? readFile(jf.log) : "";
                 if (/Cancelled/.test(log)) { status.text = "Распознавание отменено."; return; }
+                if (/No module named|Не найден распознаватель/.test(log)) { askInstall(""); return; }
                 status.text = "Распознавание не удалось — см. сообщение.";
                 alert(whyFailed(log) + "\n\nПодробности (конец журнала):\n" + log.slice(-700));
                 return;

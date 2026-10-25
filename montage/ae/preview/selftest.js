@@ -28,7 +28,10 @@ class Ctl {
 const SHOWN = [], LOG = [], WRITES = {}, settings = {};
 let TASKS = 0, LAUNCHED = null;
 // system.callSystem: "python --version" answers like Python; the background launch is recorded and run by the test
-const SYS = c => { if (/--version/.test(c)) return "Python 3.13.1"; LAUNCHED = c; return ""; };
+let HAS_FW = true, CONFIRM = true; const CONFIRMS = [];
+// "python -c …import faster_whisper" answers like a Python with (or without) the recogniser; launches are recorded
+const SYS = c => { if (/ -c "import sys/.test(c)) return "Python 3.13.1 /usr/bin/python3\n" + (HAS_FW ? "FW_OK" : "ModuleNotFoundError: No module named 'faster_whisper'");
+    LAUNCHED = c; return ""; };
 let DIALOG_TEXT = "", OPEN_FILE = null;
 class Window extends Ctl { constructor(type, title) { super(type === "dialog" ? "dialog" : "window", null, title); } }
 class Panel {}
@@ -53,7 +56,7 @@ class FootageItem { constructor(f) { this.file = f; this.name = f.name; this.has
 class FolderItem { constructor(n) { this.name = n; } }
 const sandbox = { Window, Panel, SHOWN, File: FileS, Folder: FolderS, FootageItem, FolderItem,
     ImportOptions: function (f) { this.file = f; },
-    $: { fileName: path.join(AE, "CaptionAE.jsx"), os: "Windows", global: {} }, system: { callSystem: c => SYS(c) }, alert: m => LOG.push("ALERT: " + m) };
+    $: { fileName: path.join(AE, "CaptionAE.jsx"), os: "Windows", global: {} }, system: { callSystem: c => SYS(c) }, alert: m => LOG.push("ALERT: " + m), confirm: m => { CONFIRMS.push(m); return CONFIRM; } };
 mock.install(sandbox);
 mock.Layer.prototype.sourceRectAtTime = function () { return { left: -200, top: -50, width: 400, height: 100 }; };
 Object.assign(sandbox.app, {
@@ -130,11 +133,23 @@ if (!WRITES[progFile + ".cancel"]) recErrs.push("cancel file not written");
 else fs.writeFileSync(progFile + ".cancel", "1"); // the stub File records writes; put it on disk for Python
 const r3 = runPy(a3, { PYTHONPATH: OUT + "/fw" }), outF = Buffer.from(a3[1].slice(4), "hex").toString();
 if (fs.existsSync(outF) || !/Cancelled/.test(fs.readFileSync(outF + ".log", "utf8"))) recErrs.push("transcribe.py ignored the cancel file");
-// 4) failure: recognizer not installed → the alert says so
-B("Распознать речь слоя").onClick(); runPy(pyArgs(LAUNCHED), { PYTHONPATH: "" });
-const nA = LOG.length; sandbox.$.global.CaptionAE_poll();
-const al = LOG.slice(nA).join(" ");
-if (!/Распознавание не установлено/.test(al)) recErrs.push("failure alert: " + al.slice(0, 120));
+// 4) recogniser missing (found by the quick check) → offer to install → install runs in the background → done
+HAS_FW = false; B("Распознать речь слоя").onClick();
+if (!/не установлено для Python/.test(CONFIRMS.join(" ")) || !/\/usr\/bin\/python3/.test(CONFIRMS.join(" "))) recErrs.push("no install offer naming the Python: " + CONFIRMS.join(" | "));
+if (!/--install hex:/.test(LAUNCHED)) recErrs.push("install not launched: " + LAUNCHED);
+const ib = Buffer.from(LAUNCHED.match(/--install hex:(\S+)/)[1], "hex").toString();
+sandbox.$.global.CaptionAE_poll(); if (!/Устанавливаю/.test(status())) recErrs.push("install progress: " + status());
+fs.writeFileSync(ib + ".log", "OK"); fs.writeFileSync(ib + ".done", ""); sandbox.$.global.CaptionAE_poll();
+if (!/установлено/.test(status())) recErrs.push("install done status: " + status());
+// 4b) declined → no launch, hint in the status
+CONFIRM = false; LAUNCHED = null; B("Распознать речь слоя").onClick();
+if (LAUNCHED || !/install_mac/.test(status())) recErrs.push("declined install: " + status());
+// 4c) recognition itself fails with "not installed" (e.g. a different Python at run time) → offer again
+HAS_FW = true; CONFIRM = true; B("Распознать речь слоя").onClick(); runPy(pyArgs(LAUNCHED), { PYTHONPATH: "" });
+const nC = CONFIRMS.length; sandbox.$.global.CaptionAE_poll();
+if (CONFIRMS.length !== nC + 1) recErrs.push("run-time missing recogniser did not offer install");
+sandbox.$.global.CaptionAE_poll(); // the install job it started
+tabs0.children[0].find("Отменить распознавание").onClick();
 console.log(recErrs.length ? "RECOGNITION ERRORS:\n" + recErrs.join("\n") : "recognition: background run, progress, plain edits, cancel, failure — OK");
 
 // ---------- full matrix: every option of every tab ----------
