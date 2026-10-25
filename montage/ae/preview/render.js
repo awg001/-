@@ -123,7 +123,7 @@ function effectOf(layer, t) {
 // The function body is fixed; the expression arrives as data and is evaluated with AE's globals in scope.
 const EVAL = new Function("ctx", "code", "with (ctx) { return eval(code); }");
 // AE adds arrays with +, JavaScript would concatenate them: rewrite the one vector form the plugin uses, value+[...]
-const vec = code => code.replace(/^value\+(\[[\s\S]*\])$/, "add(value,$1)");
+const vec = code => code.replace(/^value\+(\[[\s\S]*\])$/, "add(value,$1)").replace(/^try\{value\+(\[[^\]]*\])\}/, "try{add(value,$1)}");
 function run(code, layer, t, extra) {
     let rnd = Math.random;
     const key = extra.key || "";

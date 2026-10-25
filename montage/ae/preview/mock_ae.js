@@ -90,6 +90,7 @@ class CompItem {
 
 function install(globalObj) {
     globalObj.CompItem = CompItem;
+    globalObj.TextLayer = class TextLayer { static [Symbol.hasInstance](x) { return x instanceof Layer && x.kind === "text"; } };
     globalObj.ParagraphJustification = { CENTER_JUSTIFY: "center" };
     globalObj.KeyframeInterpolationType = { LINEAR: 1, HOLD: 2, BEZIER: 3 };
     globalObj.app = { effects: [{ displayName: "Glow", matchName: "ADBE Glo2" }, { displayName: "CC Light Sweep", matchName: "CC Light Sweep" }] };

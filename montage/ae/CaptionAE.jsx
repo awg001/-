@@ -277,9 +277,8 @@
     }
 
     function highlightExpr(T) {
-        return "var T=" + arr(T) + ",on=thisComp.layer(\"" + CTRL + "\").effect(\"Karaoke\")(1).value;\n" +
-            "var i=Math.min(textIndex-1,T.length-1),t=time-inPoint;\n" +
-            "var v=(on&&t>=T[i]&&(i==T.length-1||t<T[i+1]))?100:0;[v,v,v]";
+        return "var T=" + arr(T) + ",i=Math.min(textIndex-1,T.length-1),t=time-inPoint;\n" +
+            "var v=(t>=T[i]&&(i==T.length-1||t<T[i+1]))?100:0;[v,v,v]";
     }
 
     // key word flies in from a bigger scale with blur, out-expo over 0.5 s, on its own reveal time
@@ -306,11 +305,7 @@
         n.name = CTRL; n.comment = TAG; n.enabled = false;
         addEffect(n, "ADBE Slider Control", "Size %", 100);
         addEffect(n, "ADBE Slider Control", "Y offset", 0);
-        addEffect(n, "ADBE Color Control", "Text", [1, 1, 1]);
-        addEffect(n, "ADBE Color Control", "Highlight", opt.hl);
-        addEffect(n, "ADBE Color Control", "Accent", opt.accent);
-        addEffect(n, "ADBE Checkbox Control", "Karaoke", opt.karaoke ? 1 : 0);
-        return n;
+        return n; // only size and height: colours live on the text layers themselves (Character panel works)
     }
 
     function addAnimator(layer, name, props, expr, basedOn) {
@@ -398,7 +393,6 @@
     function buildSubs(comp, ph, opt, offset) {
         var ctrl = getCtrl(comp, opt), styles = pickStyles(ph, opt.style, opt.en, opt.smart);
         var exits = pickExits(ph, styles, opt.exit, opt.en, opt.smart);
-        var C = 'thisComp.layer("' + CTRL + '")';
         if (opt.mblur) comp.motionBlur = true;
         var made = 0, i, j;
         for (i = 0; i < ph.length; i++) {
@@ -432,7 +426,7 @@
 
             var srcProp = layer.property("ADBE Text Properties").property("ADBE Text Document"), td = srcProp.value;
             td.resetCharStyle(); td.resetParagraphStyle();
-            td.font = opt.font; td.fontSize = opt.size; td.fillColor = [1, 1, 1];
+            td.font = opt.font; td.fontSize = opt.size; td.fillColor = opt.text || [1, 1, 1];
             td.applyStroke = opt.stroke; td.strokeColor = [0, 0, 0]; td.strokeWidth = Math.round(opt.size * 0.09);
             td.strokeOverFill = false; td.justification = ParagraphJustification.CENTER_JUSTIFY;
             if (opt.leadingPct) { // line spacing as % of the font size instead of AE's auto (120 %)
@@ -459,11 +453,15 @@
             more.property("ADBE Text Anchor Point Option").setValue(2); // scale each word around its own center
             more.property("ADBE Text Anchor Point Align").setValue([0, -35]);
 
-            addAnimator(layer, "Base color", { "ADBE Text Fill Color": C + '.effect("Text")(1)' }, null);
-            var accP = { "ADBE Text Fill Color": C + '.effect("Accent")(1)' };
-            if (!plan && accS !== 100) accP["ADBE Text Scale 3D"] = [accS, accS, 100]; // a hero word is already big
-            addAnimator(layer, "Accent", accP, accentExpr(A));
-            addAnimator(layer, "Highlight", { "ADBE Text Fill Color": C + '.effect("Highlight")(1)', "ADBE Text Scale 3D": [104, 104, 100] }, highlightExpr(S));
+            // colours are plain values, not links to CAPTION_CTRL: the Character panel and the animators stay editable,
+            // and deleting the null cannot turn anything red
+            var anyAcc = false; for (j = 0; j < A.length; j++) if (A[j]) anyAcc = true;
+            if (anyAcc) {
+                var accP = { "ADBE Text Fill Color": opt.accent };
+                if (!plan && accS !== 100) accP["ADBE Text Scale 3D"] = [accS, accS, 100]; // a hero word is already big
+                addAnimator(layer, "Accent", accP, accentExpr(A));
+            }
+            if (opt.karaoke) addAnimator(layer, "Highlight", { "ADBE Text Fill Color": opt.hl, "ADBE Text Scale 3D": [104, 104, 100] }, highlightExpr(S));
             var rv = {};
             if (st.scale !== 100) rv["ADBE Text Scale 3D"] = [st.scale, st.scale, 100];
             if (st.pos[0] || st.pos[1]) rv["ADBE Text Position 3D"] = [st.pos[0], st.pos[1], 0];
@@ -495,9 +493,9 @@
             // center on the fully revealed line, measured before the exit starts scattering it
             tr.property("ADBE Anchor Point").expression = "var r=sourceRectAtTime(Math.max(inPoint,outPoint-" + D + "-thisComp.frameDuration),false);[r.left+r.width/2,r.top+r.height/2]";
             tr.property("ADBE Position").setValue([comp.width / 2, comp.height * opt.posY]);
-            tr.property("ADBE Position").expression = "value+[0," + C + '.effect("Y offset")(1)]';
+            tr.property("ADBE Position").expression = ctrlPosExpr;
             tr.property("ADBE Scale").setValue([fit, fit]);
-            tr.property("ADBE Scale").expression = "var s=" + C + '.effect("Size %")(1)/100;[value[0]*s,value[1]*s]';
+            tr.property("ADBE Scale").expression = ctrlScaleExpr;
             if (exits[i] === "fade") tr.property("ADBE Opacity").expression = "var f=3*thisComp.frameDuration;value*linear(time,outPoint-f,outPoint,1,0)";
             function on(scope) { return scope === "all" || (scope === "hot" && hotI); }
             if (on(opt.sweep)) addSweep(layer, ta, 0.6);
@@ -705,6 +703,40 @@
             L.motionBlur = true; made.push(L);
         }
         return made;
+    }
+
+    // size and height of all captions from CAPTION_CTRL; without the null the layer simply keeps its own values
+    var ctrlPosExpr = 'try{value+[0,thisComp.layer("' + CTRL + '").effect("Y offset")(1)]}catch(e){value}';
+    var ctrlScaleExpr = 'try{var s=thisComp.layer("' + CTRL + '").effect("Size %")(1)/100;[value[0]*s,value[1]*s]}catch(e){value}';
+
+    // Recolour captions already in the comp, also ones made by older versions: the text's own fill = text colour,
+    // accent / karaoke animators get plain colours (karaoke stays only if «Караоке» is ticked); old links to CAPTION_CTRL ("Base color", Karaoke switch) go away.
+    function recolorSubs(comp, o) {
+        var n = 0, i, k;
+        for (i = 1; i <= comp.numLayers; i++) {
+            var L = comp.layer(i);
+            if (L.comment !== TAG || !(L instanceof TextLayer)) continue;
+            var src = L.property("ADBE Text Properties").property("ADBE Text Document"), td = src.value;
+            td.fillColor = o.text; src.setValue(td);
+            var ans = L.property("ADBE Text Properties").property("ADBE Text Animators");
+            for (k = ans.numProperties; k >= 1; k--) {
+                var an = ans.property(k);
+                if (an.name === "Base color" || (an.name === "Highlight" && !o.karaoke)) { an.remove(); continue; }
+                if (an.name !== "Accent" && an.name !== "Highlight") continue;
+                var fc = an.property("ADBE Text Animator Properties").property("ADBE Text Fill Color");
+                if (!fc) continue;
+                fc.expression = ""; fc.setValue(an.name === "Highlight" ? o.hl : o.accent);
+                if (an.name === "Highlight") { // the old karaoke switch lived on the null
+                    var am = an.property("ADBE Text Selectors").property(1).property("ADBE Text Expressible Amount");
+                    am.expression = am.expression.replace(/,on=thisComp\.layer\("[^"]*"\)\.effect\("Karaoke"\)\(1\)\.value;/, ";").replace("on&&", "");
+                }
+            }
+            var tr = L.property("ADBE Transform Group");
+            if (/^value\+\[0,/.test(tr.property("ADBE Position").expression)) tr.property("ADBE Position").expression = ctrlPosExpr;
+            if (/^var s=/.test(tr.property("ADBE Scale").expression)) tr.property("ADBE Scale").expression = ctrlScaleExpr;
+            n++;
+        }
+        return n;
     }
 
     function removeSubs(comp) {
@@ -1020,6 +1052,12 @@
     var eAcc = r3c.add("edittext", undefined, pref("acc", "FFFFFF")); eAcc.characters = 6;
     r3c.add("statictext", undefined, "крупнее %");
     var eAccS = r3c.add("edittext", undefined, pref("accS", "112")); eAccS.characters = 3;
+    var r3e = g3.add("group");
+    r3e.add("statictext", undefined, "Текст #");
+    var eTxt = r3e.add("edittext", undefined, pref("txt", "FFFFFF")); eTxt.characters = 6;
+    var bRecolor = r3e.add("button", undefined, "Перекрасить готовые");
+    bRecolor.helpTip = "Новые цвета текста, акцента и подсветки — всем субтитрам Caption AE в композиции, включая сделанные старой версией. " +
+        "Одну фразу можно перекрасить и вручную: панель Character (Fill) или аниматор Accent.";
     var r3d = g3.add("group");
     var cKara = r3d.add("checkbox", undefined, "Караоке"); cKara.value = pref("kara", "0") === "1";
     var cUpper = r3d.add("checkbox", undefined, "КАПС"); cUpper.value = pref("upper", "0") === "1";
@@ -1098,7 +1136,7 @@
         if (!P) return;
         ddStyle.selection = find(STYLE_KEYS, P.style); ddExit.selection = find(EXIT_KEYS, P.exit);
         eFont.text = P.font; eSize.text = P.size; cKara.value = P.kara; cUpper.value = P.upper; cStroke.value = P.stroke;
-        cShadow.value = P.shadow; cHotHit.value = P.hotHit; eAcc.text = P.acc; eHl.text = "F7D640";
+        cShadow.value = P.shadow; cHotHit.value = P.hotHit; eAcc.text = P.acc; eHl.text = "F7D640"; eTxt.text = "FFFFFF";
         for (var i = 0; i < TYPO.length; i++) if (TYPO[i][0] === P.typo) ddTypo.selection = i;
         eFont2.text = P.font2; eBig.text = P.big; eSmall.text = P.small; ddGlow.selection = P.glow; ddSweep.selection = P.sweep;
         cHeroUp.value = P.heroUp; cHeroFly.value = P.heroFly; cMblur.value = true; cZoom.value = !!P.zoom;
@@ -1299,7 +1337,7 @@
         var col = hex(ePCol.text.replace("#", ""));
         return { ph: ph, col: col, fixed: fixed, opt: { en: {}, smart: false, style: "none", exit: "none", mblur: false, font: ePFont.text, size: +ePSize.text || 72,
             posY: (+ePY.text || 75) / 100, maxChars: 999, lineWords: lines === 2 ? per : 0, leadingPct: Math.max(50, +ePLead.text || 110), hold: Math.max(0, +ePHold.text || 0), fixedDur: fixed ? Math.max(0.2, +ePDur.text || 1.5) : 0,
-            hl: col, accent: col, karaoke: false, upper: cPUp.value, stroke: false, shadow: cPSh.value, hotHit: false, typo: "plain",
+            text: col, hl: col, accent: col, karaoke: false, upper: cPUp.value, stroke: false, shadow: cPSh.value, hotHit: false, typo: "plain",
             glow: "none", sweep: "none", display: "whole", accentScale: 100, heroUpper: false, heroFly: false,
             noPunct: cPNoP.value, keepQE: cPQE.value } };
     }
@@ -1315,7 +1353,6 @@
         try {
             var old = removeSubs(comp);
             var made = buildSubs(comp, ph, opt, offset);
-            comp.layer(CTRL).property("ADBE Effect Parade").property("Text").property(1).setValue(col);
             status.text = "Готово: " + plural(made, ["субтитр", "субтитра", "субтитров"]) + (fixed ? ", по " + opt.fixedDur + " с" : ", по речи") + "." +
                 (old ? " Прежние заменены — вернуть: Ctrl+Z." : "");
         } catch (e) { fail("Не удалось создать субтитры.", e); }
@@ -1471,7 +1508,7 @@
             heroUpper: cHeroUp.value, heroFly: cHeroFly.value,
             style: STYLE_KEYS[ddStyle.selection.index], exit: EXIT_KEYS[ddExit.selection.index], mblur: cMblur.value, font: eFont.text, size: +eSize.text || 90,
             posY: (+ePos.text || 72) / 100, maxChars: +eChars.text || 18, hold: 0.4,
-            hl: hex(eHl.text.replace("#", "")), accent: hex(eAcc.text.replace("#", "")),
+            text: hex(eTxt.text.replace("#", "")), hl: hex(eHl.text.replace("#", "")), accent: hex(eAcc.text.replace("#", "")),
             karaoke: cKara.value, upper: cUpper.value, stroke: cStroke.value, shadow: cShadow.value,
             noPunct: cNoPunct.value, keepQE: cKeepQE.value,
             accentScale: +eAccS.text || 112, zoomAmt: +eZoom.text || 12, zoomDur: ddZoomKind.selection.index ? 4 * comp.frameDuration : 0
@@ -1486,7 +1523,7 @@
             smart: cSmart.value ? 1 : 0, display: ddDisplay.selection.index, hotHit: cHotHit.value ? 1 : 0, typo: ddTypo.selection.index, font2: eFont2.text,
             bigPct: eBig.text, smallPct: eSmall.text, glow: ddGlow.selection.index, sweep: ddSweep.selection.index,
             heroUp: cHeroUp.value ? 1 : 0, heroFly: cHeroFly.value ? 1 : 0, preset: ddPreset.selection.index, voice: cVoice.value ? 1 : 0, thr: eThr.text, font: eFont.text, size: eSize.text,
-            posY: ePos.text, hl: eHl.text, acc: eAcc.text, kara: cKara.value ? 1 : 0, upper: cUpper.value ? 1 : 0,
+            posY: ePos.text, hl: eHl.text, acc: eAcc.text, txt: eTxt.text, kara: cKara.value ? 1 : 0, upper: cUpper.value ? 1 : 0,
             stroke: cStroke.value ? 1 : 0, shadow: cShadow.value ? 1 : 0, noPunct: cNoPunct.value ? 1 : 0, keepQE: cKeepQE.value ? 1 : 0,
             zoom: cZoom.value ? 1 : 0, zoomAmt: eZoom.text, accS: eAccS.text, zoomKind: ddZoomKind.selection.index,
             sfxPh: ddSfx.selection.index, sfxHit: cSfxHit.value ? 1 : 0, sfxDb: eSfxDb.text, sfxDir: eSfxDir.text };
@@ -1507,8 +1544,19 @@
             var n = buildSubs(comp, ph, opt, offset);
             var ns = plan.length ? addSfx(comp, plan, SF, +eSfxDb.text || -10) : 0;
             status.text = opt.note || ("Готово: " + plural(n, ["фраза", "фразы", "фраз"]) + (ns ? ", " + plural(ns, ["звук", "звука", "звуков"]) : "") +
-                ". Цвет и размер — слой " + CTRL + "." + (old ? " Прежние заменены — вернуть: Ctrl+Z." : ""));
+                ". Цвет — как у обычного текста (Character); общий размер и высота — слой " + CTRL + "." + (old ? " Прежние заменены — вернуть: Ctrl+Z." : ""));
         } catch (e) { fail("Не удалось создать субтитры.", e); }
+        app.endUndoGroup();
+    };
+
+    bRecolor.onClick = function () {
+        var comp = activeComp(); if (!comp) return;
+        setPref("txt", eTxt.text); setPref("hl", eHl.text); setPref("acc", eAcc.text);
+        app.beginUndoGroup("Caption AE: перекрасить");
+        try {
+            var n = recolorSubs(comp, { text: hex(eTxt.text.replace("#", "")), hl: hex(eHl.text.replace("#", "")), accent: hex(eAcc.text.replace("#", "")), karaoke: cKara.value });
+            status.text = n ? "Перекрашено: " + plural(n, ["фраза", "фразы", "фраз"]) + ". Вернуть: Ctrl+Z." : "В этой композиции нет субтитров Caption AE.";
+        } catch (e) { fail("Не удалось перекрасить субтитры.", e); }
         app.endUndoGroup();
     };
 
