@@ -26,6 +26,9 @@ class Ctl {
     find(t) { if (this.text === t) return this; for (const c of this.children) { const r = c.find(t); if (r) return r; } return null; }
 }
 const SHOWN = [], LOG = [], WRITES = {}, settings = {};
+let TASKS = 0, LAUNCHED = null;
+// system.callSystem: "python --version" answers like Python; the background launch is recorded and run by the test
+const SYS = c => { if (/--version/.test(c)) return "Python 3.13.1"; LAUNCHED = c; return ""; };
 let DIALOG_TEXT = "", OPEN_FILE = null;
 class Window extends Ctl { constructor(type, title) { super(type === "dialog" ? "dialog" : "window", null, title); } }
 class Panel {}
@@ -50,12 +53,13 @@ class FootageItem { constructor(f) { this.file = f; this.name = f.name; this.has
 class FolderItem { constructor(n) { this.name = n; } }
 const sandbox = { Window, Panel, SHOWN, File: FileS, Folder: FolderS, FootageItem, FolderItem,
     ImportOptions: function (f) { this.file = f; },
-    $: { fileName: path.join(AE, "CaptionAE.jsx"), os: "Windows" }, system: { callSystem: () => "" }, alert: m => LOG.push("ALERT: " + m) };
+    $: { fileName: path.join(AE, "CaptionAE.jsx"), os: "Windows", global: {} }, system: { callSystem: c => SYS(c) }, alert: m => LOG.push("ALERT: " + m) };
 mock.install(sandbox);
 mock.Layer.prototype.sourceRectAtTime = function () { return { left: -200, top: -50, width: 400, height: 100 }; };
 Object.assign(sandbox.app, {
     settings: { haveSetting: (s, k) => (s + k) in settings, getSetting: (s, k) => settings[s + k], saveSetting: (s, k, v) => { settings[s + k] = v; } },
     preferences: { getPrefAsLong: () => 1 }, beginUndoGroup() {}, endUndoGroup() {},
+    scheduleTask: () => ++TASKS, cancelTask() {},
     project: { activeItem: null, get numItems() { return items.length; }, item: i => items[i - 1],
         importFile(o) { const it = new FootageItem(o.file); items.push(it); return it; },
         items: { addFolder(n) { const f = new FolderItem(n); items.push(f); return f; } } }
@@ -72,6 +76,66 @@ const status = () => win.children.find(c => c.type === "statictext").text;
 const comp = new sandbox.CompItem(1080, 1920, 12, 30); sandbox.app.project.activeItem = comp;
 const vid = comp.layers.addSolid([0,0,0], "talking_head.mp4", 1080, 1920); vid.source = { file: {} }; comp.selectedLayers = [vid];
 
+
+// ---------- background recognition: real transcribe.py, fake recognizer, poll / progress / cancel / failure ----------
+const cp = require("child_process");
+const FW = OUT + "/fw/faster_whisper"; fs.mkdirSync(FW, { recursive: true });
+fs.writeFileSync(FW + "/__init__.py", `import time
+class W:
+    def __init__(s, w, a, b): s.word, s.start, s.end = w, a, b
+class WhisperModel:
+    def __init__(self, model, device, compute_type): self.device = device
+    def transcribe(self, media, **k):
+        def gen():
+            if self.device != "cpu": raise RuntimeError("Library cublas64_12.dll is not found")  # GPU without CUDA
+            for i, t in enumerate(["Двенадцать", "лет", "царская", "власть", "охотилась", "за", "одним", "человеком."]):
+                time.sleep(0.05); yield type("S", (), {"words": [W(" " + t, i * 0.5, i * 0.5 + 0.4)], "end": i * 0.5 + 0.5})()
+        return gen(), type("I", (), {"duration": 4.0})()
+`);
+fs.writeFileSync(FW + "/audio.py", "import numpy as np\ndef decode_audio(m): return np.random.default_rng(0).normal(0, .1, 16000 * 3)\n");
+const MEDIA = OUT + "/монтаж/Sequence 01.mp4"; fs.mkdirSync(path.dirname(MEDIA), { recursive: true }); fs.writeFileSync(MEDIA, "x");
+vid.source = { file: { fsName: MEDIA, exists: true } }; comp.selectedLayers = [vid];
+const pyArgs = cmd => cmd.match(/"[^"]*transcribe\.py" (.*)$/)[1].split(" ");
+const runPy = (args, env) => cp.spawnSync("python3", [path.join(AE, "transcribe.py"), ...args], { env: Object.assign({}, process.env, env) });
+const recErrs = [];
+const tabs0 = win.children.find(c => c.type === "tabbedpanel");
+const pEdit = (function f(c) { if (c.type === "edittext" && c.props.multiline) return c; for (const k of c.children) { const r = f(k); if (r) return r; } })(tabs0.children[1]);
+// 1) success
+B("Распознать речь слоя").onClick();
+if (!LAUNCHED || !/start "Caption AE" \/min/.test(LAUNCHED)) recErrs.push("not launched in background: " + LAUNCHED);
+if (win.find("Отменить распознавание") === null) recErrs.push("button did not turn into cancel");
+sandbox.$.global.CaptionAE_poll(); const st1 = status();
+{ const pf = Buffer.from(pyArgs(LAUNCHED)[4].slice(4), "hex").toString(); fs.writeFileSync(pf, "Распознаю|0.420");
+  sandbox.$.global.CaptionAE_poll(); if (!/Распознаю — 42 %/.test(status())) recErrs.push("progress not shown: " + status()); else console.log("progress:", status().slice(0, 40)); }
+runPy(pyArgs(LAUNCHED), { PYTHONPATH: OUT + "/fw" });
+sandbox.$.global.CaptionAE_poll();
+console.log("recognition:", st1.slice(0, 60), "→", status().slice(0, 70));
+if (!/Распознаю|Загружаю|Запускаю/.test(st1)) recErrs.push("no progress status: " + st1);
+const ed0 = tabs0.children[0].find("Строка = фраза. Enter делит фразу, *слово* = акцент.").parent.children.find(c => c.type === "edittext");
+if (!/Двенадцать/.test(ed0.text)) recErrs.push("subtitles tab text empty after recognition");
+if (!/Двенадцать/.test(pEdit.text)) recErrs.push("plain tab text empty after recognition");
+// 2) plain: fix a word, change words per line — the fix survives; build uses it
+pEdit.text = pEdit.text.replace("охотилась", "ОХОТИЛАСЬ");
+const pdd0 = (function all(c, r) { if (c.type === "dropdownlist") r.push(c); c.children.forEach(k => all(k, r)); return r; })(tabs0.children[1], []);
+pdd0[0].selection = 2; pdd0[0].onChange();
+if (!/ОХОТИЛАСЬ/.test(pEdit.text)) recErrs.push("plain edit lost on regroup: " + pEdit.text);
+tabs0.children[1].find("Создать субтитры").onClick();
+if (!comp.layerList.some(l => /ОХОТИЛАСЬ/.test(l.name))) recErrs.push("plain build ignored the edited text");
+// 3) cancel
+B("Распознать речь слоя").onClick(); const a3 = pyArgs(LAUNCHED);
+tabs0.children[0].find("Отменить распознавание").onClick();
+if (!/отменено/.test(status())) recErrs.push("cancel status: " + status());
+const progFile = Buffer.from(a3[4].slice(4), "hex").toString();
+if (!WRITES[progFile + ".cancel"]) recErrs.push("cancel file not written");
+else fs.writeFileSync(progFile + ".cancel", "1"); // the stub File records writes; put it on disk for Python
+const r3 = runPy(a3, { PYTHONPATH: OUT + "/fw" }), outF = Buffer.from(a3[1].slice(4), "hex").toString();
+if (fs.existsSync(outF) || !/Cancelled/.test(fs.readFileSync(outF + ".log", "utf8"))) recErrs.push("transcribe.py ignored the cancel file");
+// 4) failure: recognizer not installed → the alert says so
+B("Распознать речь слоя").onClick(); runPy(pyArgs(LAUNCHED), { PYTHONPATH: "" });
+const nA = LOG.length; sandbox.$.global.CaptionAE_poll();
+const al = LOG.slice(nA).join(" ");
+if (!/Распознавание не установлено/.test(al)) recErrs.push("failure alert: " + al.slice(0, 120));
+console.log(recErrs.length ? "RECOGNITION ERRORS:\n" + recErrs.join("\n") : "recognition: background run, progress, plain edits, cancel, failure — OK");
 
 // ---------- full matrix: every option of every tab ----------
 const errs = [], ok = [];
@@ -146,4 +210,4 @@ for (const L of comp.layerList) for (const fx of L.property("ADBE Effect Parade"
     if (/ amount$/.test(fx.name)) { amounts++; if (fx.property(1).keys.length < 2) dead++; }
 console.log(amounts, "shake amount sliders,", dead, "without keyframes");
 const kinds = {}; for (const L of comp.layerList) kinds[L.kind] = (kinds[L.kind] || 0) + 1; console.log("layers:", JSON.stringify(kinds));
-if (errs.length || dead) process.exit(1);
+if (errs.length || dead || recErrs.length) process.exit(1);

@@ -1,4 +1,9 @@
-"""Speech → word timings for CaptionAE.jsx: python3 transcribe.py media.mp4 out.json [ru] [small]
+"""Speech → word timings for CaptionAE.jsx: python3 transcribe.py media.mp4 out.json [ru] [small] [progress.txt]
+
+The panel runs it in the background (After Effects stays responsive) and watches files next to out.json:
+progress.txt — "stage text|fraction" while working; progress.txt.cancel — created by the panel to stop;
+out.json.log — everything printed, with the traceback on failure; out.json.failed — written when it stopped
+without a result. out.json itself appears only when complete.
 
 Paths may come as "hex:<UTF-8 bytes in hex>": the panel sends them so, because Windows' command line breaks
 non-Latin folder names (A:\\монтаж\\...).
@@ -10,13 +15,35 @@ db = how much louder than the speaker's median the word was said (Caption AE tur
 import json, os, sys
 
 
+class Cancelled(Exception):
+    pass
+
+
+PROGRESS = None
+
+
+def report(stage, frac=0.0):
+    if not PROGRESS:
+        return
+    if os.path.exists(PROGRESS + '.cancel'):
+        raise Cancelled('Отменено')
+    with open(PROGRESS, 'w', encoding='utf8') as f:
+        f.write('%s|%.3f' % (stage, frac))
+
+
 def with_faster_whisper(media, lang, model):
     from faster_whisper import WhisperModel
 
     def run(device, compute):
+        report('Загружаю модель %s (первый раз скачивается: small ~0,5 ГБ, medium ~1,5 ГБ, large-v3 ~3 ГБ)' % model)
         m = WhisperModel(model, device=device, compute_type=compute)
-        segs, _ = m.transcribe(media, language=lang, word_timestamps=True, vad_filter=True)
-        return [(w.word, w.start, w.end) for s in segs for w in (s.words or [])]  # segments are lazy: errors surface here
+        segs, info = m.transcribe(media, language=lang, word_timestamps=True, vad_filter=True)
+        dur, out = max(info.duration or 0, 0.1), []
+        report('Распознаю', 0)
+        for s in segs:  # segments are lazy: errors (and the work) happen here
+            out += [(w.word, w.start, w.end) for w in (s.words or [])]
+            report('Распознаю', min(1, s.end / dur))
+        return out
 
     try:
         return run('auto', 'auto')  # an NVIDIA card is used when its CUDA libraries are installed
@@ -45,17 +72,21 @@ def loudness(media, words):
     sr, db = 16000, []
     for _, s, e in words:
         seg = a[int(s * sr):max(int(e * sr), int(s * sr) + 1)]
-        db.append(20 * np.log10(np.sqrt(np.mean(seg.astype(np.float64) ** 2)) + 1e-9))
-    med = float(np.median(db))
-    return [round(float(d - med), 1) for d in db]
+        # a word past the end of the decoded audio has no samples: no loudness (NaN would break the JSON)
+        db.append(20 * np.log10(np.sqrt(np.mean(seg.astype(np.float64) ** 2)) + 1e-9) if len(seg) else None)
+    known = [d for d in db if d is not None]
+    med = float(np.median(known)) if known else 0.0
+    return [round(float(d - med), 1) if d is not None else None for d in db]
 
 
 def arg_path(p):
     return bytes.fromhex(p[4:]).decode('utf-8') if p.startswith('hex:') else p
 
 
-def main(media, out, lang='ru', model='small'):
+def main(media, out, lang='ru', model='small', progress=None):
+    global PROGRESS
     media, out = arg_path(media), arg_path(out)
+    PROGRESS = arg_path(progress) if progress else None
     if not os.path.exists(media):
         sys.exit('FileNotFoundError: No such file: %r' % media)
     lang = None if lang == 'auto' else lang
@@ -65,7 +96,8 @@ def main(media, out, lang='ru', model='small'):
         try:
             words = with_openai_whisper(media, lang, model)
         except ImportError:
-            sys.exit('Не найден распознаватель. Установите: pip install faster-whisper')
+            sys.exit('Не найден распознаватель (No module named faster_whisper). Установите: pip install faster-whisper')
+    report('Анализ громкости', 1)
     try:
         db = loudness(media, words)
     except Exception as ex:  # accents are a bonus: keep the transcript even if audio analysis fails
@@ -73,9 +105,21 @@ def main(media, out, lang='ru', model='small'):
         db = [None] * len(words)
     res = [dict({'w': w.strip(), 'start': round(s, 3), 'end': round(e, 3)}, **({'db': d} if d is not None else {}))
            for (w, s, e), d in zip(words, db) if w.strip()]
-    json.dump(res, open(out, 'w', encoding='utf8'), ensure_ascii=False, indent=0)
+    json.dump(res, open(out + '.tmp', 'w', encoding='utf8'), ensure_ascii=False, indent=0)
+    os.replace(out + '.tmp', out)  # appears complete or not at all: the panel polls for it
     print(f'{len(res)} words')
 
 
 if __name__ == '__main__':
-    main(*sys.argv[1:5])
+    args = sys.argv[1:6]
+    out = arg_path(args[1]) if len(args) > 1 else None
+    if out and len(args) > 4:  # background mode: everything goes to out.log, failure leaves out.failed
+        sys.stdout = sys.stderr = open(out + '.log', 'w', encoding='utf8', buffering=1)
+        try:
+            main(*args)
+        except BaseException:
+            import traceback
+            traceback.print_exc()
+            open(out + '.failed', 'w').close()
+    else:
+        main(*args)

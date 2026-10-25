@@ -34,7 +34,7 @@ STEP 3. SPEECH RECOGNITION (ONCE)
 
 HOW TO USE
 1. Open a composition and select the layer with the voice (video or audio).
-2. "Субтитры" (Captions) tab → «Распознать речь слоя» (Transcribe layer). AE freezes while it works — that's normal.
+2. "Субтитры" (Captions) tab → «Распознать речь слоя» (Transcribe layer). It runs in the background with progress in the status line; AE stays usable.
    Or «Импорт SRT / JSON» (Import SRT / JSON), e.g. an SRT exported from Premiere Pro.
 3. Check the text: one line = one caption; *word* in asterisks = accent.
 4. Pick display mode, style, typography → «Создать субтитры» (Create captions).

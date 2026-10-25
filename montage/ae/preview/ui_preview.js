@@ -34,9 +34,9 @@ const sandbox = {
     app: {
         settings: { haveSetting: (s, k) => (s + k) in settings, getSetting: (s, k) => settings[s + k], saveSetting: (s, k, v) => { settings[s + k] = v; } },
         project: { activeItem: null }, effects: [], preferences: { getPrefAsLong: () => 1 },
-        beginUndoGroup() {}, endUndoGroup() {}
+        beginUndoGroup() {}, endUndoGroup() {}, scheduleTask: () => 1, cancelTask() {}
     },
-    $: { fileName: "/x/CaptionAE.jsx", os: "Windows" },
+    $: { fileName: "/x/CaptionAE.jsx", os: "Windows", global: {} },
     File: Object.assign(p => ({ parent: { fsName: "/x" }, exists: false, fsName: p }), { openDialog: () => null }),
     Folder: { temp: { fsName: "/tmp" } }, system: { callSystem: () => "" },
     ParagraphJustification: { CENTER_JUSTIFY: 1 }, alert: () => {}

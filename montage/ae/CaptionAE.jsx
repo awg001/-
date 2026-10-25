@@ -984,7 +984,12 @@
     r1c.add("statictext", undefined, "Модель");
     var ddModel = r1c.add("dropdownlist", undefined, ["small", "medium", "large-v3"]);
     ddModel.selection = { small: 0, medium: 1, "large-v3": 2 }[pref("model", "small")] || 0;
-    ddModel.helpTip = "small — быстрее, medium и large-v3 — точнее, но дольше";
+    ddModel.helpTip = "small — быстро. medium и large-v3 — точнее, но на процессоре в 3–6 раз дольше; в первый раз скачиваются 1,5 и 3 ГБ";
+    ddModel.onChange = function () {
+        if (ddModel.selection && ddModel.selection.index > 0)
+            status.text = ddModel.selection.text + ": точнее, но дольше, в первый раз скачается " + (ddModel.selection.index === 1 ? "~1,5" : "~3") +
+                " ГБ. Распознавание идёт в фоне — AE можно пользоваться.";
+    };
     r1c.add("statictext", undefined, "Python");
     var ePy = r1c.add("edittext", undefined, pref("python", defaultPython())); ePy.characters = 14;
     ePy.helpTip = "Путь к Python, в который установлен faster-whisper";
@@ -1294,6 +1299,8 @@
     var bPImp = p0.add("button", undefined, "Импорт SRT / JSON");
     var bPDict = p0.add("button", undefined, "Словарь…"); bPDict.helpTip = bDict.helpTip;
     var pInfo = gp.add("statictext", undefined, "Текст: ещё не загружен", { truncate: "end" }); pInfo.preferredSize = [380, 18];
+    var pEdit = gp.add("edittext", undefined, "", { multiline: true, scrolling: true }); pEdit.preferredSize = [380, 120];
+    pEdit.helpTip = "Строка = один субтитр. Исправляйте слова прямо здесь; при смене «Слов в строке» правки сохраняются.";
     var p1 = gp.add("group"); p1.add("statictext", undefined, "Слов в строке");
     var ddPN = p1.add("dropdownlist", undefined, ["1", "2", "3", "4", "5", "6"]); ddPN.selection = Math.min(+pref("pN", "1"), 5);
     p1.add("statictext", undefined, "Строк");
@@ -1327,9 +1334,24 @@
     var bPSrt = p7.add("button", undefined, "Экспорт SRT");
     gp.add("statictext", undefined, "Фиксированная длительность обрывается раньше, если следующие слова уже звучат.\n«Создать» заменяет прежние субтитры Caption AE (вернуть — Ctrl+Z).", { multiline: true });
 
+    // plain tab text: edits go back into the words, so regrouping (another «Слов в строке») keeps them
+    function syncPlain() {
+        if (!words.length || !trim(pEdit.text)) return;
+        var ph = textToPhrases(pEdit.text, words), nw = [], i, j;
+        for (i = 0; i < ph.length; i++) for (j = 0; j < ph[i].length; j++) nw.push({ w: ph[i][j].w, start: ph[i][j].start, end: ph[i][j].end });
+        if (nw.length) words = nw;
+    }
+    function plainRegroup(fresh) {
+        if (!fresh) syncPlain();
+        var n = (ddPN.selection.index + 1) * (ddPL.selection.index + 1);
+        pEdit.text = words.length ? phrasesToText(groupPhrases(words, n, 999, cPBreak.value ? 0.4 : 1e9, !cPBreak.value)) : "";
+        plainInfo();
+    }
+    ddPN.onChange = ddPL.onChange = function () { plainRegroup(false); };
+    cPBreak.onClick = function () { plainRegroup(false); };
     function plainInfo() { pInfo.text = words.length ? "Текст: " + words.length + " слов, " + fmtTime(words[words.length - 1].end) : "Текст: ещё не загружен"; }
-    bPTrans.onClick = function () { bTrans.onClick(); plainInfo(); };
-    bPImp.onClick = function () { bImport.onClick(); plainInfo(); };
+    bPTrans.onClick = function () { bTrans.onClick(); }; // the text arrives when recognition finishes (onWords)
+    bPImp.onClick = function () { bImport.onClick(); };
     bPDel.onClick = function () { bRemove.onClick(); };
     bPDict.onClick = function () { openDict(); };
     // plain captions as set on the tab: the phrases and the options for buildSubs / srtText
@@ -1339,7 +1361,7 @@
             pFont: ePFont.text, pSize: ePSize.text, pY: ePY.text, pCol: ePCol.text, pUp: cPUp.value ? 1 : 0, pSh: cPSh.value ? 1 : 0,
             pNoPunct: cPNoP.value ? 1 : 0, pKeepQE: cPQE.value ? 1 : 0 };
         for (var k in keep) setPref(k, keep[k]);
-        var ph = groupPhrases(words, n, 999, cPBreak.value ? 0.4 : 1e9, !cPBreak.value);
+        var ph = trim(pEdit.text) ? textToPhrases(pEdit.text, words) : groupPhrases(words, n, 999, cPBreak.value ? 0.4 : 1e9, !cPBreak.value);
         var col = hex(ePCol.text.replace("#", ""));
         return { ph: ph, col: col, fixed: fixed, opt: { en: {}, smart: false, style: "none", exit: "none", mblur: false, font: ePFont.text, size: +ePSize.text || 72,
             posY: (+ePY.text || 75) / 100, maxChars: 999, lineWords: lines === 2 ? per : 0, leadingPct: Math.max(50, +ePLead.text || 110), hold: Math.max(0, +ePHold.text || 0), fixedDur: fixed ? Math.max(0.2, +ePDur.text || 1.5) : 0,
@@ -1389,6 +1411,7 @@
         if (!rules.length) { status.text = "Словарь пуст — в каждой строке нужно «было = стало»."; return; }
         if (words.length) { var rw = applyDict(words, rules); words = rw.words; nW = rw.n; }
         if (trim(editor.text)) { var rt = applyDictText(editor.text, rules); editor.text = rt.text; nT = rt.n; }
+        if (trim(pEdit.text)) pEdit.text = applyDictText(pEdit.text, rules).text;
         plainInfo();
         status.text = "Словарь сохранён: " + plural(rules.length, ["замена", "замены", "замен"]) + ". Исправлено мест в тексте: " +
             Math.max(nW, nT) + ". Новые тексты исправляются сами.";
@@ -1457,6 +1480,7 @@
     }
 
     bTrans.onClick = function () {
+        if (job) { cancelJob(); return; } // while running, the same button stops it
         var comp = activeComp(); if (!comp) return;
         var L = comp.selectedLayers[0];
         if (!L || !L.source || !L.source.file) {
@@ -1468,23 +1492,73 @@
         if (!canRunCommands()) return;
         var py = File(scriptDir.fsName + "/transcribe.py");
         if (!py.exists) { alert("Рядом со скриптом нет transcribe.py:\n" + py.fsName); return; }
-        var out = File(Folder.temp.fsName + "/captionae_words.json"); if (out.exists) out.remove();
         setPref("python", ePy.text); setPref("model", ddModel.selection.text);
-        status.text = "Распознаю… (AE подвиснет на время распознавания)"; win.update && win.update();
         var q = function (s) { return '"' + s + '"'; };
+        var ver = String(system.callSystem(q(ePy.text) + " --version")); // seconds, not minutes: is Python there at all?
+        if (!/Python \d/.test(ver)) { alert(whyFailed(ver) + "\n\nПодробности:\n" + ver.slice(-400)); return; }
+        // a separate file set per run, so a cancelled run finishing late cannot be mistaken for this one
+        var id = new Date().getTime(), base = Folder.temp.fsName + "/captionae_" + id;
+        var out = File(base + ".json"), prog = File(base + "_progress.txt");
         // file paths go as hex of their UTF-8 bytes: Windows' command line mangles non-Latin names ("A:\монтаж\...")
-        var log = system.callSystem(q(ePy.text) + " " + q(py.fsName) + " hex:" + hexUtf8(L.source.file.fsName) + " hex:" + hexUtf8(out.fsName) +
-            " " + ddLang.selection.text + " " + ddModel.selection.text);
-        if (!out.exists) {
-            alert(whyFailed(String(log)) + "\n\nПодробности (конец журнала):\n" + String(log).slice(-700));
-            status.text = "Распознавание не удалось — см. сообщение."; return;
-        }
-        words = parseJSONWords(readFile(out));
-        offset = L.startTime; // word times are from the file start; the layer may be shifted in the comp
-        srcLayerName = srcName = L.name;
+        var args = q(py.fsName) + " hex:" + hexUtf8(L.source.file.fsName) + " hex:" + hexUtf8(out.fsName) + " " +
+            ddLang.selection.text + " " + ddModel.selection.text + " hex:" + hexUtf8(prog.fsName);
+        // in the background: After Effects stays usable; the panel polls the progress file (CaptionAE_poll below)
+        if ($.os.indexOf("Windows") >= 0) system.callSystem('cmd.exe /c start "Caption AE" /min ' + q(ePy.text) + " " + args);
+        else system.callSystem(q(ePy.text) + " " + args + " > /dev/null 2>&1 &");
+        job = { out: out, prog: prog, log: File(base + ".json.log"), failed: File(base + ".json.failed"), t0: new Date().getTime(),
+            offset: L.startTime, name: L.name, model: ddModel.selection.text };
+        bTrans.text = bPTrans.text = "Отменить распознавание";
+        status.text = "Запускаю распознавание (" + job.model + ")… AE можно пользоваться.";
+        job.task = app.scheduleTask("$.global.CaptionAE_poll()", 700, true);
+    };
+
+    // ---------- background recognition: one job at a time, watched by a scheduled task ----------
+    var job = null;
+    function endJob() {
+        if (!job) return;
+        try { app.cancelTask(job.task); } catch (e) {}
+        bTrans.text = bPTrans.text = "Распознать речь слоя";
+        var j = job; job = null;
+        return j;
+    }
+    function cancelJob() {
+        var j = endJob(); if (!j) return;
+        var c = File(j.prog.fsName + ".cancel"); c.open("w"); c.write("1"); c.close(); // transcribe.py stops at its next step
+        status.text = "Распознавание отменено.";
+    }
+    function onWords() { // fresh words from recognition or import: both tabs show them
         var fx = fixWords();
-        regroup();
+        regroup(); plainRegroup(true);
         if (fx) status.text += " Словарь исправил: " + fx + ".";
+    }
+    $.global.CaptionAE_poll = function () {
+        if (!job) return;
+        try {
+            if (job.out.exists) {
+                var j = endJob();
+                words = parseJSONWords(readFile(j.out));
+                offset = j.offset; // word times are from the file start; the layer may be shifted in the comp
+                srcLayerName = srcName = j.name;
+                onWords();
+                try { j.out.remove(); j.prog.remove(); j.log.remove(); } catch (eRm) {}
+                return;
+            }
+            if (job.failed.exists) {
+                var jf = endJob(), log = jf.log.exists ? readFile(jf.log) : "";
+                if (/Cancelled/.test(log)) { status.text = "Распознавание отменено."; return; }
+                status.text = "Распознавание не удалось — см. сообщение.";
+                alert(whyFailed(log) + "\n\nПодробности (конец журнала):\n" + log.slice(-700));
+                return;
+            }
+            var secs = Math.round((new Date().getTime() - job.t0) / 1000);
+            if (!job.prog.exists && !job.log.exists && secs > 40) { // Python never started
+                endJob(); status.text = "Распознавание не запустилось.";
+                alert(whyFailed("") + "\n\nКоманда: " + ePy.text); return;
+            }
+            var st = job.prog.exists ? readFile(job.prog).split("|") : ["Запускаю распознавание", "0"];
+            var pct = Math.round(100 * (+st[1] || 0));
+            status.text = st[0] + (pct ? " — " + pct + " %" : "") + " (" + fmtTime(secs) .replace(/\.\d$/, "") + "). AE можно пользоваться; «Отменить распознавание» — остановить.";
+        } catch (e) { endJob(); fail("Не удалось получить результат распознавания.", e); }
     };
 
     bImport.onClick = function () {
@@ -1494,9 +1568,7 @@
         try { words = /\.json$/i.test(f.name) ? parseJSONWords(s) : parseSRT(s); }
         catch (e) { alert("Не удалось прочитать файл. Нужен SRT или JSON со словами (как из transcribe.py).\n\nПодробности: " + e); return; }
         offset = 0; srcName = f.name; srcLayerName = "";
-        var fx = fixWords();
-        regroup();
-        if (fx) status.text += " Словарь исправил: " + fx + ".";
+        onWords();
     };
 
     bRegroup.onClick = regroup;
