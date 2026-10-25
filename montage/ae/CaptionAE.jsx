@@ -877,6 +877,30 @@
             e + (e && e.line ? ", строка " + e.line : ""));
     }
 
+    // ASCII-only form of a path for the command line; transcribe.py decodes "hex:…" back to UTF-8
+    function hexUtf8(str) {
+        var e = encodeURIComponent(str), out = "", i, h;
+        for (i = 0; i < e.length; i++) {
+            if (e.charAt(i) === "%") { out += e.substr(i + 1, 2); i += 2; }
+            else { h = e.charCodeAt(i).toString(16); out += h.length < 2 ? "0" + h : h; }
+        }
+        return out.toLowerCase();
+    }
+    // what went wrong with recognition, in words, from transcribe.py's log
+    function whyFailed(log) {
+        if (/No module named|Не найден распознаватель/.test(log))
+            return "Распознавание не установлено для этого Python.\nЗапустите install_windows.bat (Mac: install_mac.command) из архива и повторите.";
+        if (/FileNotFoundError|No such file/.test(log))
+            return "Python не нашёл файл видео/аудио этого слоя.\nПроверьте, что файл на месте и диск подключён; если путь очень длинный или на сетевом диске — скопируйте файл в обычную папку и переподключите.";
+        if (/SSL|CERTIFICATE/i.test(log))
+            return "Не удалось скачать модель распознавания (ошибка сертификата).\nMac: Программы → Python 3.x → «Install Certificates.command». Затем повторите.";
+        if (/HTTP|Connection|resolve|timed out|huggingface/i.test(log))
+            return "Не удалось скачать модель распознавания — нужен интернет при первом запуске. Проверьте сеть и повторите.";
+        if (/not recognized|не является|not found|не найден/i.test(log) || !/Traceback/.test(log))
+            return "Python не запустился.\nВ «Настройки ▸» в поле Python впишите: python (или py). На Mac — путь из команды which python3.";
+        return "Распознавание не удалось.\nПришлите скриншот этого окна.";
+    }
+
     function hex(c) { return [parseInt(c.substr(0, 2), 16) / 255, parseInt(c.substr(2, 2), 16) / 255, parseInt(c.substr(4, 2), 16) / 255]; }
 
     var win = thisObj instanceof Panel ? thisObj : new Window("palette", "Caption AE — субтитры, тряска, акценты", undefined, { resizeable: true });
@@ -1392,7 +1416,12 @@
     bTrans.onClick = function () {
         var comp = activeComp(); if (!comp) return;
         var L = comp.selectedLayers[0];
-        if (!L || !L.source || !L.source.file) { alert("Выделите в композиции слой с аудио/видео файлом."); return; }
+        if (!L || !L.source || !L.source.file) {
+            alert("Выделите в композиции слой с аудио/видео файлом.\nЕсли это вложенная композиция — откройте её и выделите исходный видео- или аудиослой."); return;
+        }
+        if (L.source.footageMissing || !L.source.file.exists) {
+            alert("Файл этого слоя не найден:\n" + L.source.file.fsName + "\nПереподключите его (File → Replace Footage) или выделите другой слой."); return;
+        }
         if (!canRunCommands()) return;
         var py = File(scriptDir.fsName + "/transcribe.py");
         if (!py.exists) { alert("Рядом со скриптом нет transcribe.py:\n" + py.fsName); return; }
@@ -1400,11 +1429,11 @@
         setPref("python", ePy.text); setPref("model", ddModel.selection.text);
         status.text = "Распознаю… (AE подвиснет на время распознавания)"; win.update && win.update();
         var q = function (s) { return '"' + s + '"'; };
-        var log = system.callSystem(q(ePy.text) + " " + q(py.fsName) + " " + q(L.source.file.fsName) + " " + q(out.fsName) +
+        // file paths go as hex of their UTF-8 bytes: Windows' command line mangles non-Latin names ("A:\монтаж\...")
+        var log = system.callSystem(q(ePy.text) + " " + q(py.fsName) + " hex:" + hexUtf8(L.source.file.fsName) + " hex:" + hexUtf8(out.fsName) +
             " " + ddLang.selection.text + " " + ddModel.selection.text);
         if (!out.exists) {
-            alert("Распознавание не удалось.\nПроверьте в «Настройки ▸» поле Python и что распознавание установлено " +
-                "(install_windows.bat или install_mac.command из архива), затем повторите.\n\nПодробности:\n" + log);
+            alert(whyFailed(String(log)) + "\n\nПодробности (конец журнала):\n" + String(log).slice(-700));
             status.text = "Распознавание не удалось — см. сообщение."; return;
         }
         words = parseJSONWords(readFile(out));

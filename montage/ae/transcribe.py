@@ -1,10 +1,13 @@
 """Speech → word timings for CaptionAE.jsx: python3 transcribe.py media.mp4 out.json [ru] [small]
 
+Paths may come as "hex:<UTF-8 bytes in hex>": the panel sends them so, because Windows' command line breaks
+non-Latin folder names (A:\\монтаж\\...).
+
 Runs locally on the editor's machine. Needs `pip install faster-whisper` (the model downloads once, ~0.5–3 GB).
 Falls back to openai-whisper if that is what is installed. Output is the same format as tools/align.py:
 [{"w": "слово", "start": 1.23, "end": 1.51, "db": 4.2}, ...] — times in seconds from the start of the media file,
 db = how much louder than the speaker's median the word was said (Caption AE turns the loudest into accents)."""
-import json, sys
+import json, os, sys
 
 
 def with_faster_whisper(media, lang, model):
@@ -36,7 +39,14 @@ def loudness(media, words):
     return [round(float(d - med), 1) for d in db]
 
 
+def arg_path(p):
+    return bytes.fromhex(p[4:]).decode('utf-8') if p.startswith('hex:') else p
+
+
 def main(media, out, lang='ru', model='small'):
+    media, out = arg_path(media), arg_path(out)
+    if not os.path.exists(media):
+        sys.exit('FileNotFoundError: No such file: %r' % media)
     lang = None if lang == 'auto' else lang
     try:
         words = with_faster_whisper(media, lang, model)
